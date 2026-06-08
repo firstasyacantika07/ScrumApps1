@@ -29,10 +29,10 @@ const createLog = async (userId, projectId, activityDescription) => {
 exports.createProject = async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role; // Ambil informasi role user dari enkripsi JWT Middleware
+    const userRole = req.user.role || ''; // Ambil informasi role user dari enkripsi JWT Middleware
 
-    // 🔥 PEMBARUAN PROTEKSI ROLE: Hanya tingkatan SUPERADMIN yang diizinkan memproses data baru
-    if (userRole !== 'SUPERADMIN') {
+    // 🔥 PERBAIKAN PROTEKSI ROLE: Menggunakan .toUpperCase() agar 'Superadmin' atau 'superadmin' lolos validasi
+    if (userRole.toUpperCase() !== 'SUPERADMIN') {
       return res.status(403).json({ 
         message: "Akses Ditolak: Hanya akun dengan tingkatan SUPERADMIN yang memiliki hak akses untuk membuat proyek baru." 
       });
@@ -42,7 +42,7 @@ exports.createProject = async (req, res) => {
     const [userPlan] = await db.query(`SELECT package_type FROM tbr_users WHERE id = ?`, [userId]);
     const [projectCount] = await db.query(`SELECT COUNT(*) as total FROM tbr_projects WHERE user_id = ?`, [userId]);
 
-    const packageType = userPlan[0]?.package_type || 'FREE';
+    const packageType = (userPlan[0]?.package_type || 'FREE').toUpperCase(); // Normalisasi ke UPPERCASE
     const currentTotal = projectCount[0]?.total || 0;
 
     if (packageType === 'FREE' && currentTotal >= 1) return res.status(403).json({ message: "Limit paket FREE tercapai." });
@@ -86,8 +86,22 @@ exports.updateProject = async (req, res) => {
   try {
     const projectId = req.params.id;
     const userId = req.user.id;
+    const userRole = req.user.role || '';
+
+    // 💡 PENYESUAIAN: Superadmin atau Team yang berelasi dengan project bisa melakukan update status
+    let sql = `UPDATE tbr_projects SET name=?, start_date=?, end_date=?, status=?, updated_at=NOW() WHERE id=? AND user_id=?`;
+    let params = [req.body.name, req.body.start_date, req.body.end_date, req.body.status, projectId, userId];
+
+    if (userRole.toUpperCase() !== 'SUPERADMIN') {
+      // Jika bukan superadmin, pastikan dia tergabung dalam tim untuk mengupdate status proyek
+      const [checkTeam] = await db.query(`SELECT id FROM tbr_teams WHERE project_id = ? AND user_id = ?`, [projectId, userId]);
+      if (checkTeam.length === 0) return res.status(403).json({ message: "Akses Ditolak: Anda tidak memiliki akses ke proyek ini." });
+      
+      sql = `UPDATE tbr_projects SET name=?, start_date=?, end_date=?, status=?, updated_at=NOW() WHERE id=?`;
+      params = [req.body.name, req.body.start_date, req.body.end_date, req.body.status, projectId];
+    }
     
-    await db.query(`UPDATE tbr_projects SET name=?, start_date=?, end_date=?, status=?, updated_at=NOW() WHERE id=? AND user_id=?`, [req.body.name, req.body.start_date, req.body.end_date, req.body.status, projectId, userId]);
+    await db.query(sql, params);
     
     // Catat perubahan konfigurasi proyek
     await createLog(userId, projectId, `Memperbarui detail informasi atau konfigurasi proyek ke status: "${req.body.status}"`);
@@ -100,12 +114,18 @@ exports.deleteProject = async (req, res) => {
   try {
     const projectId = req.params.id;
     const userId = req.user.id;
+    const userRole = req.user.role || '';
+
+    // 🔥 PROTEKSI: Hanya Superadmin yang boleh menghapus total project
+    if (userRole.toUpperCase() !== 'SUPERADMIN') {
+      return res.status(403).json({ message: "Akses Ditolak: Hanya Superadmin yang dapat menghapus proyek." });
+    }
 
     // Ambil info nama proyek sebelum dihapus untuk kepentingan deskripsi log audit
     const [projectInfo] = await db.query(`SELECT name FROM tbr_projects WHERE id = ?`, [projectId]);
     const projectName = projectInfo[0]?.name || "Unknown";
 
-    await db.query(`DELETE FROM tbr_projects WHERE id=? AND user_id=?`, [projectId, userId]);
+    await db.query(`DELETE FROM tbr_projects WHERE id=?`, [projectId]);
     
     // Catat log penghapusan proyek
     await createLog(userId, projectId, `Menghapus proyek "${projectName}" secara permanen dari sistem`);
