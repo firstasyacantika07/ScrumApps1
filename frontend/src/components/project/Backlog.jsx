@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { 
-  Plus, Search, Edit2, Trash2, 
-  Layers, User, Tag, AlertCircle, Clock
+  Search, Edit2, Trash2, Layers, User, Clock
 } from 'lucide-react';
 import api from '../../api/axios';
 
-const Backlog = ({ projectId }) => {
+const Backlog = ({ projectId, currentRole }) => {
   const [backlogs, setBacklogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -25,12 +24,16 @@ const Backlog = ({ projectId }) => {
 
   const [formData, setFormData] = useState(initialFormState);
 
+  // Validasi Otorisasi Peran (SUPERADMIN & BUSINESSANALYST)
+  const isSuperAdmin = currentRole === 'SUPERADMIN';
+  const isBA = currentRole === 'BUSINESSANALYST';
+  const hasWriteAccess = isSuperAdmin || isBA;
+
   const fetchBacklogs = useCallback(async () => {
     try {
       setLoading(true);
-      // Menggunakan endpoint /projects/:projectId/backlogs
       const res = await api.get(`/projects/${projectId}/backlogs`);
-      setBacklogs(res.data);
+      setBacklogs(res.data || []);
     } catch (err) {
       console.error("Gagal mengambil data:", err);
     } finally {
@@ -49,9 +52,13 @@ const Backlog = ({ projectId }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!hasWriteAccess) {
+      alert("Akses Ditolak: Anda tidak memiliki otoritas mengubah data.");
+      return;
+    }
+
     try {
       if (isEditing) {
-        // PERBAIKAN: Menambahkan prefix /projects agar tidak 404
         await api.put(`/projects/backlogs/${currentId}`, formData);
       } else {
         await api.post(`/projects/${projectId}/backlogs`, {
@@ -83,9 +90,13 @@ const Backlog = ({ projectId }) => {
   };
 
   const handleDelete = async (id) => {
+    if (!hasWriteAccess) {
+      alert("Akses Ditolak: Anda tidak memiliki otoritas menghapus data.");
+      return;
+    }
+
     if (window.confirm("Hapus backlog ini secara permanen?")) {
       try {
-        // PERBAIKAN: Menambahkan prefix /projects agar tidak 404
         await api.delete(`/projects/backlogs/${id}`);
         fetchBacklogs();
       } catch (err) {
@@ -95,16 +106,16 @@ const Backlog = ({ projectId }) => {
   };
 
   const filteredBacklogs = backlogs.filter(item => 
-    item.name.toLowerCase().includes(searchTerm.toLowerCase())
+    item.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* HEADER & SEARCH */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight">Backlog Management</h2>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">List fitur dan kebutuhan proyek</p>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-0.5">List fitur dan kebutuhan proyek</p>
         </div>
         <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
@@ -118,72 +129,75 @@ const Backlog = ({ projectId }) => {
         </div>
       </div>
 
-      {/* FORM SECTION */}
-      <div className="bg-white rounded-[2rem] border border-slate-100 p-6 shadow-sm">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* FORM SECTION: Hanya muncul jika dalam kondisi EDITING data */}
+      {isEditing && hasWriteAccess && (
+        <div className="bg-slate-50/70 rounded-[2rem] border border-blue-100 p-6 shadow-sm animate-in slide-in-from-top-4 duration-300">
+          <div className="mb-4">
+            <span className="px-2.5 py-1 bg-blue-600 text-white text-[9px] font-black rounded-md uppercase tracking-wider">Mode Edit Backlog</span>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nama Backlog</label>
+                <input
+                  name="name"
+                  className="w-full bg-white border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
+                  value={formData.name}
+                  onChange={handleInputChange}
+                  placeholder="Contoh: Fitur Login Multi-role"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Applicant (Pengaju)</label>
+                <input
+                  name="applicant"
+                  className="w-full bg-white border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
+                  value={formData.applicant}
+                  onChange={handleInputChange}
+                  placeholder="Nama Client/Stakeholder"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Prioritas</label>
+                <select 
+                  name="priority" 
+                  className="w-full bg-white border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
+                  value={formData.priority}
+                  onChange={handleInputChange}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Status Database</label>
+                <select 
+                  name="status" 
+                  className="w-full bg-white border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 font-bold text-blue-600 transition-all"
+                  value={formData.status}
+                  onChange={handleInputChange}
+                >
+                  <option value="inactive">Inactive (Draft)</option>
+                  <option value="active">Active (Ready for Sprint)</option>
+                </select>
+              </div>
+            </div>
+
             <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Nama Backlog</label>
-              <input
-                name="name"
-                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
-                value={formData.name}
+              <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Deskripsi Detail</label>
+              <textarea
+                name="description"
+                className="w-full bg-white border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
+                rows="3"
+                value={formData.description}
                 onChange={handleInputChange}
-                placeholder="Contoh: Fitur Login Multi-role"
-                required
+                placeholder="Jelaskan kriteria pengerjaan..."
               />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Applicant (Pengaju)</label>
-              <input
-                name="applicant"
-                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
-                value={formData.applicant}
-                onChange={handleInputChange}
-                placeholder="Nama Client/Stakeholder"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Prioritas</label>
-              <select 
-                name="priority" 
-                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
-                value={formData.priority}
-                onChange={handleInputChange}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Status Database</label>
-              <select 
-                name="status" 
-                className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 font-bold text-blue-600 transition-all"
-                value={formData.status}
-                onChange={handleInputChange}
-              >
-                <option value="inactive">Inactive (Draft)</option>
-                <option value="active">Active (Ready for Sprint)</option>
-              </select>
-            </div>
-          </div>
 
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Deskripsi Detail</label>
-            <textarea
-              name="description"
-              className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
-              rows="3"
-              value={formData.description}
-              onChange={handleInputChange}
-              placeholder="Jelaskan kriteria pengerjaan..."
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            {isEditing && (
+            <div className="flex justify-end gap-3 pt-2">
               <button 
                 type="button" 
                 onClick={() => { setIsEditing(false); setFormData(initialFormState); }}
@@ -191,22 +205,22 @@ const Backlog = ({ projectId }) => {
               >
                 Batal
               </button>
-            )}
-            <button type="submit" className="px-10 py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-blue-100 hover:bg-blue-700 hover:scale-[1.02] active:scale-95 transition-all">
-              {isEditing ? 'Update Database' : 'Tambah ke Backlog'}
-            </button>
-          </div>
-        </form>
-      </div>
+              <button type="submit" className="px-10 py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
+                Update Database
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* LIST SECTION */}
       <div className="grid gap-3">
         {loading ? (
-          <div className="text-center py-10 text-slate-400 text-xs font-bold uppercase tracking-widest">Loading data...</div>
+          <div className="text-center py-20 text-slate-400 text-xs font-bold uppercase tracking-widest animate-pulse">Loading data...</div>
         ) : filteredBacklogs.length === 0 ? (
           <div className="text-center py-20 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
              <Layers size={40} className="mx-auto text-slate-200 mb-2" />
-             <p className="text-slate-400 text-[10px] font-black uppercase">Belum ada backlog pengerjaan</p>
+             <p className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Belum ada backlog pengerjaan</p>
           </div>
         ) : (
           filteredBacklogs.map((item) => (
@@ -237,14 +251,17 @@ const Backlog = ({ projectId }) => {
                 </div>
               </div>
               
-              <div className="flex items-center gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => handleEdit(item)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all shadow-sm">
-                  <Edit2 size={14} />
-                </button>
-                <button onClick={() => handleDelete(item.id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-all shadow-sm">
-                  <Trash2 size={14} />
-                </button>
-              </div>
+              {/* Tombol Aksi Kontrol Data hanya muncul untuk SUPERADMIN / BUSINESSANALYST */}
+              {hasWriteAccess && (
+                <div className="flex items-center gap-2 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => handleEdit(item)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all shadow-sm" title="Edit Backlog">
+                    <Edit2 size={14} />
+                  </button>
+                  <button onClick={() => handleDelete(item.id)} className="p-2 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-all shadow-sm" title="Hapus Backlog">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
             </div>
           ))
         )}

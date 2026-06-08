@@ -14,11 +14,12 @@ import Sprint from '../components/project/Sprint';
 import Development from '../components/project/Development';
 import Members from '../components/project/Members';
 import ProjectCalendar from '../components/project/ProjectCalendar';
+import GitHubStatusCard from '../components/github/GitHubStatusCard';
 
 // ==========================================
 // INTERNAL COMPONENT: ACTIVITY LOGS
 // ==========================================
-const ActivityLogsInline = ({ projectId }) => {
+const ActivityLogsInline = ({ projectId, currentRole }) => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -38,9 +39,7 @@ const ActivityLogsInline = ({ projectId }) => {
   }, [projectId]);
 
   useEffect(() => {
-    if (projectId) {
-      fetchLogs();
-    }
+    if (projectId) fetchLogs();
   }, [projectId, fetchLogs]);
 
   const formatDateTime = (dateString) => {
@@ -133,14 +132,14 @@ const ProjectDetail = () => {
   const location = useLocation();
 
   const [project, setProject] = useState(null);
+  const [integrationData, setIntegrationData] = useState(null); 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   
-  const [formData, setFormData] = useState({});
+  const [formData, setFormData] = useState({ title: '', description: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Default Role diatur kosong sebelum fetch data profile dari backend selesai
   const [currentUser, setCurrentUser] = useState({ id: null, role: 'GUEST' });
 
   const getModalType = () => {
@@ -149,7 +148,6 @@ const ProjectDetail = () => {
     if (location.pathname.includes('sprint')) return 'Sprint';
     if (location.pathname.includes('development')) return 'Development Task';
     if (location.pathname.includes('calendar')) return 'Event';
-    if (location.pathname.includes('logs')) return 'Activity';
     return 'Item';
   };
 
@@ -159,12 +157,22 @@ const ProjectDetail = () => {
       const user = res.data?.user || res.data || {};
       setCurrentUser({
         id: user.id,
-        role: (user.role || 'GUEST').toUpperCase()
+        role: (user.role || 'GUEST').toUpperCase().replace(/\s+/g, '')
       });
     } catch (err) {
       console.error("Gagal memuat identitas user:", err);
     }
   };
+
+  const fetchGitHubStatus = useCallback(async () => {
+    try {
+      const res = await api.get(`/projects/${id}/github-status`);
+      setIntegrationData(res.data || null);
+    } catch (err) {
+      console.error("Gagal memuat status integrasi GitHub:", err);
+      setIntegrationData(null); 
+    }
+  }, [id]);
 
   const fetchProject = useCallback(async () => {
     try {
@@ -181,16 +189,26 @@ const ProjectDetail = () => {
 
   useEffect(() => {
     if (id) {
-      Promise.all([loadUserProfile(), fetchProject()]);
+      Promise.all([loadUserProfile(), fetchProject(), fetchGitHubStatus()]);
     }
-  }, [id, fetchProject]);
+  }, [id, fetchProject, fetchGitHubStatus]);
 
-  // 🔥 PEMBARUAN RBAC: Validasi ketat pembuatan data hanya diperbolehkan untuk SUPERADMIN
+  // SINKRONISASI OTORISASI
   const isSuperAdmin = currentUser.role === 'SUPERADMIN';
+  const isBA = currentUser.role === 'BUSINESSANALYST';
+  const isProjectOwner = currentUser.role === 'PROJECTOWNER';
+
+  const hasWriteAccess = () => {
+    if (isProjectOwner) return false;
+    if (isSuperAdmin) return true;
+    if (isBA && (location.pathname.includes('vision-board') || location.pathname.includes('backlog'))) return true;
+    
+    return false;
+  };
 
   const handleSave = async () => {
-    if (!isSuperAdmin) {
-      alert("Akses Ditolak: Hanya akun dengan tingkatan SUPERADMIN yang diizinkan memanipulasi data.");
+    if (!hasWriteAccess()) {
+      alert("Akses Ditolak: Anda berada dalam mode baca atau tidak memiliki otoritas di modul ini.");
       return;
     }
 
@@ -199,16 +217,17 @@ const ProjectDetail = () => {
       let endpoint = '';
       
       if (location.pathname.includes('backlog')) endpoint = `/projects/${id}/backlogs`;
-      else if (location.pathname.includes('sprint')) endpoint = `/projects/${id}/sprints`;
-      else if (location.pathname.includes('development')) endpoint = `/projects/${id}/developments`;
       else if (location.pathname.includes('vision-board')) endpoint = `/projects/${id}/vision-boards`;
 
       if (endpoint) {
         const payload = { ...formData, name: formData.title };
         await api.post(endpoint, payload);
         setShowAddModal(false);
-        setFormData({});
-        window.location.reload(); 
+        setFormData({ title: '', description: '' });
+        
+        // PERBAIKAN: Mengganti reload aplikasi global dengan pemanggilan ulang data secara SPA
+        fetchProject();
+        fetchGitHubStatus();
       }
     } catch (err) {
       alert("Gagal menyimpan: " + (err.response?.data?.message || err.message));
@@ -257,19 +276,25 @@ const ProjectDetail = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* 🔥 PEMBARUAN: Tombol Tambah hanya dirender jika user saat ini adalah SUPERADMIN */}
-          {['backlog', 'sprint', 'development', 'vision-board'].some(p => location.pathname.includes(p)) && isSuperAdmin && (
-            <button onClick={() => { setFormData({}); setShowAddModal(true); }}
-              className="bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-black flex items-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95">
-              <Plus size={18} strokeWidth={3} /> TAMBAH {getModalType().toUpperCase()}
-            </button>
-          )}
-
-          {/* 🔥 Tampilan Mode Pantau untuk role non-superadmin */}
-          {!isSuperAdmin && (
-            <div className="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold">
-              <ShieldAlert size={16} /> Mode Pantau (Read-Only)
-            </div>
+          {['backlog', 'vision-board'].some(p => location.pathname.includes(p)) ? (
+            hasWriteAccess() ? (
+              <button onClick={() => { setFormData({ title: '', description: '' }); setShowAddModal(true); }}
+                className="bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-black flex items-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95">
+                <Plus size={18} strokeWidth={3} /> TAMBAH {getModalType().toUpperCase()}
+              </button>
+            ) : (
+              isProjectOwner && (
+                <div className="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold">
+                  <ShieldAlert size={16} /> Mode Pantau (Read-Only)
+                </div>
+              )
+            )
+          ) : (
+            isProjectOwner && ['sprint', 'development', 'members'].some(p => location.pathname.includes(p)) && (
+              <div className="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold">
+                <ShieldAlert size={16} /> Mode Pantau (Read-Only)
+              </div>
+            )
           )}
         </div>
       </div>
@@ -284,6 +309,8 @@ const ProjectDetail = () => {
             <SideLink to="backlog" icon={<Database size={18}/>} label="Backlog" />
             <SideLink to="sprint" icon={<RefreshCw size={18}/>} label="Sprint" />
             <SideLink to="development" icon={<Activity size={18}/>} label="Development" />
+            {/* PERBAIKAN: Menambahkan link navigasi ke halaman manajemen tim */}
+            <SideLink to="members" icon={<Users size={18}/>} label="Members" /> 
             <SideLink to="logs" icon={<Clock size={18}/>} label="Activity Log" /> 
           </div>
         </div>
@@ -291,20 +318,21 @@ const ProjectDetail = () => {
         {/* CONTENT AREA */}
         <div className="col-span-12 lg:col-span-9 bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm min-h-[600px]">
           <Routes>
-            <Route path="/" element={<DefaultView project={project} />} />
-            <Route path="calendar" element={<ProjectCalendar projectId={id} />} />
-            <Route path="vision-board" element={<VisionBoard projectId={id} />} />
-            {/* Teruskan role untuk merestriksi tombol aksi internal (Edit/Delete) komponen anak jika diperlukan */}
+            <Route path="/" element={<DefaultView project={project} integrationData={integrationData} refreshData={fetchGitHubStatus} />} />
+            <Route path="calendar" element={<ProjectCalendar projectId={id} currentRole={currentUser.role} />} />
+            <Route path="vision-board" element={<VisionBoard projectId={id} currentRole={currentUser.role} />} />
             <Route path="backlog" element={<Backlog projectId={id} currentRole={currentUser.role} />} />
             <Route path="sprint" element={<Sprint projectId={id} currentRole={currentUser.role} />} />
             <Route path="development" element={<Development projectId={id} currentRole={currentUser.role} />} />
-            <Route path="logs" element={<ActivityLogsInline projectId={id} />} /> 
+            {/* PERBAIKAN: Mendaftarkan sub-route untuk komponen Members agar bisa diakses */}
+            <Route path="members" element={<Members projectId={id} currentRole={currentUser.role} />} />
+            <Route path="logs" element={<ActivityLogsInline projectId={id} currentRole={currentUser.role} />} /> 
           </Routes>
         </div>
       </div>
 
-      {/* MODAL DYNAMIC */}
-      {showAddModal && isSuperAdmin && (
+      {/* MODAL DYNAMIC (Hanya untuk Vision Board & Backlog) */}
+      {showAddModal && hasWriteAccess() && ['backlog', 'vision-board'].some(p => location.pathname.includes(p)) && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-50 flex justify-between items-center">
@@ -314,22 +342,6 @@ const ProjectDetail = () => {
 
             <div className="p-8 space-y-5">
               <FormInput label="Nama / Judul" placeholder={`Masukkan nama ${getModalType()}...`} value={formData.title || ''} onChange={(e) => setFormData({...formData, title: e.target.value})} />
-              
-              {location.pathname.includes('development') && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</label>
-                    <select className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none" value={formData.status || 'todo'} onChange={(e) => setFormData({...formData, status: e.target.value})}>
-                      <option value="todo">To Do</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="qa">QA / Review</option>
-                      <option value="done">Done</option>
-                    </select>
-                  </div>
-                  <FormInput label="Ref Link (URL)" placeholder="https://..." value={formData.link || ''} onChange={(e) => setFormData({...formData, link: e.target.value})} />
-                </div>
-              )}
-
               <FormTextarea label="Deskripsi / Detail" value={formData.description || ''} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="Tulis detail pengerjaan..." />
 
               <div className="flex gap-3 pt-4">
@@ -353,13 +365,24 @@ const SideLink = ({ to, icon, label, end = false }) => (
   </NavLink>
 );
 
-const DefaultView = ({ project }) => (
-  <div className="flex flex-col items-center justify-center py-20 text-center animate-in slide-in-from-bottom-4 duration-700">
-    <div className="w-24 h-24 bg-blue-50 rounded-[2.5rem] flex items-center justify-center text-blue-200 mb-6 border border-blue-100">
-      <Briefcase size={48} />
+const DefaultView = ({ project, integrationData, refreshData }) => (
+  <div className="flex flex-col gap-8 animate-in slide-in-from-bottom-4 duration-700">
+    <div className="flex flex-col items-center justify-center py-10 text-center">
+      <div className="w-24 h-24 bg-blue-50 rounded-[2.5rem] flex items-center justify-center text-blue-200 mb-6 border border-blue-100">
+        <Briefcase size={48} />
+      </div>
+      <h3 className="text-2xl font-black text-slate-800 mb-2">{project?.name}</h3>
+      <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] max-w-sm leading-relaxed">
+        Project Dashboard. Gunakan navigasi samping untuk mengelola Development & Backlog.
+      </p>
     </div>
-    <h3 className="text-2xl font-black text-slate-800 mb-2">{project?.name}</h3>
-    <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] max-w-sm leading-relaxed">Project Dashboard. Gunakan navigasi samping untuk mengelola Development & Backlog.</p>
+
+    <div className="border-t border-slate-100 pt-6">
+      <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Integrasi Aplikasi</h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <GitHubStatusCard project={project} integrationData={integrationData} refreshData={refreshData} />
+      </div>
+    </div>
   </div>
 );
 

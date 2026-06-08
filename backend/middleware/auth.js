@@ -6,19 +6,28 @@ const db = require('../config/db');
  */
 const verifyToken = async (req, res, next) => {
   try {
-    const token = req.header("Authorization")?.replace("Bearer ", "");
+    // 🛠️ AMAN: Mengambil header dengan ekstraksi toleran spasi & huruf besar/kecil
+    const authHeader = req.header("Authorization") || req.headers["authorization"];
 
-    if (!token) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
         message: "Token diperlukan",
       });
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET
-    );
+    // Memotong string 'Bearer ' dengan aman menggunakan split
+    const token = authHeader.split(" ")[1];
 
+    if (!token || token === "null" || token === "undefined") {
+      return res.status(401).json({
+        message: "Token diperlukan",
+      });
+    }
+
+    // Verifikasi tanda tangan token JWT
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Mengambil data user dari tabel tbr_users sesuai prefix database Anda
     const [rows] = await db.query(
       `
       SELECT
@@ -47,7 +56,14 @@ const verifyToken = async (req, res, next) => {
 
     next();
   } catch (err) {
-    console.error("VERIFY TOKEN ERROR:", err);
+    console.error("🔥 VERIFY TOKEN ERROR:", err.message);
+
+    // Jika token kedaluwarsa, beri tahu frontend secara spesifik agar bisa auto-logout
+    if (err.name === "TokenExpiredError") {
+      return res.status(401).json({
+        message: "Token kedaluwarsa, silakan login kembali",
+      });
+    }
 
     return res.status(401).json({
       message: "Token tidak valid",
@@ -66,16 +82,18 @@ const authorize = (roles = [], options = {}) => {
   
   // Mengambil opsi daftar role yang diblokir khusus (jika ada)
   const forbiddenRoles = options.forbiddenRoles || [];
-  const strictForbidden = forbiddenRoles.map(r => r.toLowerCase().trim());
+  
+  // Normalisasi string untuk mengantisipasi ketidaksamaan format spasi / karakter (misal: "Business Analyst" -> "businessanalyst")
+  const strictForbidden = forbiddenRoles.map(r => r.replace(/\s+/g, '').toLowerCase().trim());
 
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ message: "Unauthorized" });
 
-    const userRole = req.user.role?.toLowerCase().trim();
-    const allowedRoles = roles.map(r => r.toLowerCase().trim());
+    // Normalisasi input role dari database user (menghapus spasi jika ada)
+    const userRole = req.user.role?.replace(/\s+/g, '').toLowerCase().trim();
+    const allowedRoles = roles.map(r => r.replace(/\s+/g, '').toLowerCase().trim());
 
     // 1. Cek Proteksi Mutlak (Forbidden Roles) terlebih dahulu
-    // Jika role user ada di daftar hitam khusus, langsung tendang (bahkan jika dia superadmin)
     if (strictForbidden.includes(userRole)) {
       return res.status(403).json({ 
         message: "Forbidden: Role Anda sengaja dibatasi untuk aksi ini." 

@@ -40,14 +40,14 @@ app.use(morgan('dev'));
 ========================================================= */
 
 const authRoutes = require('./routes/authRoutes');
-const projectRoutes = require('./routes/projectRoutes');
+const projectRoutes = require('./routes/projectRoutes'); // 💡 Di dalam sini sudah mencakup fitur integrasi GitHub
 const userRoutes = require('./routes/userRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 
-// Import tambahan untuk keperluan bypass bypass controller & middleware
+// Import tambahan untuk keperluan bypass controller & middleware
 const paymentController = require('./controllers/paymentController');
 const { verifyToken } = require('./middleware/auth');
 
@@ -57,7 +57,7 @@ const { verifyToken } = require('./middleware/auth');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/projects', projectRoutes);
+app.use('/api/projects', projectRoutes); // 🛠️ Menangani core proyek, backlog, sprint, logs, & status GitHub
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);

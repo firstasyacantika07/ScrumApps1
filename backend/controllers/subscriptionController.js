@@ -4,9 +4,9 @@ const db = require('../config/db');
 
 // Midtrans Sandbox Config
 const snap = new midtransClient.Snap({
-  isProduction: process.env.MIDTRANS_IS_PRODUCTION === "true",
-  serverKey: process.env.MIDTRANS_SERVER_KEY,
-  clientKey: process.env.MIDTRANS_CLIENT_KEY,
+    isProduction: false,
+    serverKey: process.env.MIDTRANS_SERVER_KEY,
+    clientKey: 'Mid-client-dgGTw7MIK1F7fdLK'
 });
 
 /**

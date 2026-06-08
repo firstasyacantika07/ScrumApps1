@@ -7,7 +7,8 @@ import {
   Info, 
   ChevronRight, 
   ChevronLeft, 
-  Layers3
+  Layers3,
+  GitMerge // 🌟 BARU: Ikon untuk menu GitHub Integrations
 } from 'lucide-react';
 
 const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
@@ -39,6 +40,13 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
       name: 'Pengguna', 
       path: '/users', 
       icon: <Users size={20} />, 
+      // Muncul HANYA jika role adalah superadmin
+      show: isRole('superadmin') 
+    },
+    { 
+      name: 'GitHub Integrations', // 🌟 BARU: Menu Integrasi GitHub Center
+      path: '/github-integrations', 
+      icon: <GitMerge size={20} />, 
       // Muncul HANYA jika role adalah superadmin
       show: isRole('superadmin') 
     },

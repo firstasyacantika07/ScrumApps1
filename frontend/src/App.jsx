@@ -27,6 +27,9 @@ import KelolaProfil from './pages/KelolaProfil';
 import Billing from './pages/Billing';
 import Payment from './pages/Payment';
 
+// 🌟 BARU: Halaman Pengelolaan Integrasi GitHub Khusus Super Admin
+import GitHubIntegrations from './pages/SuperAdmin/GitHubIntegrations';
+
 // ======================================================
 // LAYOUT
 // ======================================================
@@ -47,7 +50,7 @@ const ProtectedRoute = ({ children, user }) => {
 
 // ======================================================
 // 🛡️ ROLE BASED ROUTE GUARD (Pembatasan Hak Akses Admin)
-// Mencegah user biasa masuk ke halaman manajemen user.
+// Mencegah user biasa masuk ke halaman manajemen internal.
 // ======================================================
 const AdminRoute = ({ children, userRole }) => {
   if (userRole !== 'superadmin') {
@@ -207,6 +210,16 @@ function App() {
               element={
                 <AdminRoute userRole={userRole}>
                   <Users />
+                </AdminRoute>
+              }
+            />
+
+            {/* 🌟 GITHUB INTEGRATIONS - KHUSUS SUPERADMIN ONLY */}
+            <Route
+              path="/github-integrations"
+              element={
+                <AdminRoute userRole={userRole}>
+                  <GitHubIntegrations />
                 </AdminRoute>
               }
             />
