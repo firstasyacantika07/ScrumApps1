@@ -58,7 +58,7 @@ const { verifyToken } = require('./middleware/auth');
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/projects', projectRoutes); // 🛠️ Menangani core proyek, backlog, sprint, logs, & status GitHub
-app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/dashboard', verifyToken, dashboardRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 

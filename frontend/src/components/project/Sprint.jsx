@@ -22,7 +22,7 @@ const Sprint = ({ projectId, currentRole }) => {
     status: 'planned'
   });
 
-  // PERBAIKAN: Menyelaraskan dengan format token UPPERCASE dari sistem otorisasi ScrumApps
+  // Menyelaraskan dengan format token UPPERCASE dari sistem otorisasi ScrumApps
   const isSuperAdmin = currentRole === 'SUPERADMIN';
   const isBA = currentRole === 'BUSINESSANALYST';
   const hasWriteAccess = isSuperAdmin || isBA;
@@ -41,6 +41,12 @@ const Sprint = ({ projectId, currentRole }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper untuk mengubah format ISO Date (string panjang) menjadi YYYY-MM-DD agar bisa dibaca input date
+  const formatDateForInput = (dateString) => {
+    if (!dateString) return '';
+    return dateString.split('T')[0];
   };
 
   const handleSubmit = async (e) => {
@@ -70,8 +76,8 @@ const Sprint = ({ projectId, currentRole }) => {
     setFormData({
       name: item.name || '',
       description: item.description || '',
-      start_date: item.start_date || '',
-      end_date: item.end_date || '',
+      start_date: formatDateForInput(item.start_date), // ✨ FIX: Mencegah input date crash karena format ISO
+      end_date: formatDateForInput(item.end_date),     // ✨ FIX: Memotong string tanggal menjadi YYYY-MM-DD
       status: item.status || 'planned'
     });
     setIsModalOpen(true);
@@ -85,6 +91,7 @@ const Sprint = ({ projectId, currentRole }) => {
 
     if (window.confirm("Hapus sprint ini secara permanen?")) {
       try {
+        // 🛠️ PERBAIKAN: Menembak nested route spesifik milik project ID bersangkutan
         await api.delete(`/projects/${projectId}/sprints/${id}`);
         fetchSprints();
       } catch (err) {

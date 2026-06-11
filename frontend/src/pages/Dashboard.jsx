@@ -30,7 +30,6 @@ const Dashboard = () => {
         setLoading(true);
         const roleLower = user.role?.toString().toLowerCase() || '';
         
-        // Memastikan endpoint sesuai dengan role
         const statsEndpoint = (roleLower.includes('admin') || roleLower.includes('owner')) 
           ? '/dashboard/stats' 
           : '/projects/stats';
@@ -70,7 +69,10 @@ const Dashboard = () => {
     </div>
   );
 
-  const isRole = (target) => userData.role?.toString().toLowerCase().includes(target.toLowerCase());
+  const isRole = (target) => {
+    const currentRole = userData.role?.toString().toLowerCase().replace(/_/g, '') || '';
+    return currentRole.includes(target.toLowerCase().replace(/_/g, ''));
+  };
 
   return (
     <div className="p-8 pb-20 max-w-[1600px] mx-auto animate-in fade-in duration-500">
@@ -88,16 +90,14 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* View didistribusikan secara benar dengan parameter lengkap */}
       {isRole('superadmin') && <SuperAdminView stats={stats} recentProjects={recentProjects} navigate={navigate} />}
       {isRole('analyst') && <AnalystView stats={stats} recentProjects={recentProjects} navigate={navigate} />}
       {isRole('developer') && <DeveloperView stats={stats} recentProjects={recentProjects} navigate={navigate} />}
-      {(isRole('projectowner') || isRole('project_owner')) && <ProjectOwnerView stats={stats} recentProjects={recentProjects} navigate={navigate} />}
+      {isRole('projectowner') && <ProjectOwnerView stats={stats} recentProjects={recentProjects} navigate={navigate} />}
     </div>
   );
 };
 
-// Reusable Stat Card
 const StatCardModern = ({ label, value, icon, color, isDashed }) => (
   <div className={`bg-white p-6 rounded-[2rem] flex items-center gap-5 transition-all shadow-sm border border-slate-50 ${isDashed ? 'border-2 border-dashed border-slate-100' : ''}`}>
     <div className="w-14 h-14 rounded-2xl flex items-center justify-center border-2 flex-shrink-0" style={{ borderColor: color + '15', color: color, backgroundColor: color + '05' }}>
@@ -110,44 +110,39 @@ const StatCardModern = ({ label, value, icon, color, isDashed }) => (
   </div>
 );
 
-// Helper Fungsi global untuk kalkulasi ekstraksi data agar tidak redundan
 const getCleanStats = (stats, recentProjects) => {
   const safeStats = {
-    total: stats?.total ?? recentProjects?.length ?? 0,
+    total: stats?.total ?? 0,
     hold: stats?.hold ?? 0,
     progress: stats?.progress ?? 0,
     done: stats?.done ?? 0,
     late: stats?.late ?? 0,
   };
 
-  const calculatedStats = (recentProjects || []).reduce(
-    (acc, item) => {
-      const status = (item.status || '').toLowerCase();
-      acc.total += 1;
-      if (status === 'hold') acc.hold += 1;
-      else if (status === 'progress' || status === 'in progress' || status === 'on_progress') acc.progress += 1;
-      else if (status === 'done' || status === 'completed') acc.done += 1;
-      else if (status === 'late' || status === 'overdue') acc.late += 1;
-      return acc;
-    },
-    { total: 0, hold: 0, progress: 0, done: 0, late: 0 }
-  );
+  const calculated = (recentProjects || []).reduce((acc, item) => {
+    const s = (item.status || '').toLowerCase();
+    acc.total += 1;
+    if (s === 'hold') acc.hold += 1;
+    else if (['progress', 'in progress', 'on_progress'].includes(s)) acc.progress += 1;
+    else if (['done', 'completed'].includes(s)) acc.done += 1;
+    else if (['late', 'overdue'].includes(s)) acc.late += 1;
+    return acc;
+  }, { total: 0, hold: 0, progress: 0, done: 0, late: 0 });
 
   return {
-    total: safeStats.total || calculatedStats.total,
-    hold: safeStats.hold || calculatedStats.hold,
-    progress: safeStats.progress || calculatedStats.progress,
-    done: safeStats.done || calculatedStats.done,
-    late: safeStats.late || calculatedStats.late,
+    total: safeStats.total || calculated.total,
+    hold: safeStats.hold || calculated.hold,
+    progress: safeStats.progress || calculated.progress,
+    done: safeStats.done || calculated.done,
+    late: safeStats.late || calculated.late,
   };
 };
 
-// --- VIEW: SUPERADMIN ---
 const SuperAdminView = ({ stats, recentProjects, navigate }) => {
   const finalStats = getCleanStats(stats, recentProjects);
   const chartData = [
     { name: 'Hold', value: finalStats.hold, color: '#3b82f6' },
-    { name: 'In Progress', value: finalStats.progress, color: '#f59e0b' },
+    { name: 'Progress', value: finalStats.progress, color: '#f59e0b' },
     { name: 'Done', value: finalStats.done, color: '#22c55e' },
     { name: 'Late', value: finalStats.late, color: '#ef4444' },
   ].filter((item) => item.value > 0);
@@ -185,9 +180,7 @@ const SuperAdminView = ({ stats, recentProjects, navigate }) => {
           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex-1">
             <div className="flex items-center justify-between mb-6">
               <h4 className="text-xs font-black uppercase tracking-[2px] text-slate-800">Proyek Terbaru</h4>
-              <button onClick={() => navigate('/projects')} className="text-[#ee1e2d] hover:bg-red-50 p-2 rounded-lg transition-colors">
-                <ArrowRight size={18} />
-              </button>
+              <button onClick={() => navigate('/projects')} className="text-[#ee1e2d] hover:bg-red-50 p-2 rounded-lg transition-colors"><ArrowRight size={18} /></button>
             </div>
             <div className="space-y-4">
               {recentProjects.map((p, i) => (
@@ -196,7 +189,7 @@ const SuperAdminView = ({ stats, recentProjects, navigate }) => {
                     <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-[#ee1e2d] font-bold border border-slate-100 group-hover:bg-[#ee1e2d] group-hover:text-white transition-all">
                       {p.name?.charAt(0).toUpperCase()}
                     </div>
-                    <div className="overflow-hidden">
+                    <div>
                       <p className="text-xs font-black text-slate-800 truncate">{p.name || 'Proyek'}</p>
                       <p className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1 mt-1"><Clock size={10} /> {p.status}</p>
                     </div>
@@ -206,11 +199,11 @@ const SuperAdminView = ({ stats, recentProjects, navigate }) => {
             </div>
           </div>
 
-          <div className="bg-[#ee1e2d] p-8 rounded-[3rem] text-white shadow-2xl shadow-red-200 relative overflow-hidden group">
+          <div className="bg-[#ee1e2d] p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group">
             <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-white/10 rounded-full group-hover:scale-110 transition-transform"></div>
             <p className="text-[9px] font-black uppercase tracking-[2px] opacity-70 mb-2">Layanan Kami</p>
             <h3 className="text-xl font-black leading-tight mb-6">Paket SaaS &<br />Pricing Plan</h3>
-            <button onClick={() => navigate('/billing')} className="flex items-center gap-2 px-5 py-3 bg-white text-[#ee1e2d] rounded-xl text-[9px] font-black uppercase tracking-widest hover:shadow-lg hover:scale-105 transition-all duration-300">
+            <button onClick={() => navigate('/billing')} className="flex items-center gap-2 px-5 py-3 bg-white text-[#ee1e2d] rounded-xl text-[9px] font-black uppercase tracking-widest hover:shadow-lg transition-all">
               Lihat Harga <ChevronRight size={14} />
             </button>
           </div>
@@ -220,10 +213,8 @@ const SuperAdminView = ({ stats, recentProjects, navigate }) => {
   );
 };
 
-// --- VIEW: BUSINESS ANALYST ---
 const AnalystView = ({ stats, recentProjects, navigate }) => {
   const finalStats = getCleanStats(stats, recentProjects);
-
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -232,46 +223,29 @@ const AnalystView = ({ stats, recentProjects, navigate }) => {
         <StatCardModern label="Done" value={finalStats.done} icon={<CheckCircle2 />} color="#22c55e" />
         <StatCardModern label="Late" value={finalStats.late} icon={<AlertCircle />} color="#ef4444" />
       </div>
-
       <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-blue-500 pl-4">
-            Analisis Proyek Berjalan
-          </h3>
-          <button onClick={() => navigate('/projects')} className="text-xs font-black text-blue-600 hover:underline uppercase tracking-wider">
-            Lihat Semua
-          </button>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-blue-500 pl-4">Analisis Proyek</h3>
+          <button onClick={() => navigate('/projects')} className="text-xs font-black text-blue-600 uppercase tracking-wider">Lihat Semua</button>
         </div>
-
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {recentProjects.length === 0 ? (
-            <div className="col-span-3 text-center py-10 text-slate-400 text-xs font-bold uppercase">Belum ada data pengerjaan aktif.</div>
-          ) : (
-            recentProjects.map((p) => (
-              <div key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="p-6 rounded-[2rem] bg-slate-50 border border-slate-100 hover:bg-white hover:shadow-md transition-all cursor-pointer group flex flex-col justify-between min-h-[140px]">
-                <div>
-                  <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase ${p.status?.toLowerCase() === 'done' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                    {p.status}
-                  </span>
-                  <p className="font-black text-slate-800 text-sm mt-3 group-hover:text-blue-600 transition-colors line-clamp-2">{p.name}</p>
-                </div>
-                <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-200/60 text-[10px] font-bold text-slate-400">
-                  <span>ID: #{p.id}</span>
-                  <ArrowRight size={14} className="text-slate-400 group-hover:translate-x-1 transition-transform" />
-                </div>
+          {recentProjects.map((p) => (
+            <div key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="p-6 rounded-[2rem] bg-slate-50 hover:bg-white border border-slate-100 transition-all cursor-pointer group">
+              <p className="font-black text-slate-800 text-sm mt-3">{p.name}</p>
+              <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-200 text-[10px] font-bold text-slate-400">
+                <span>ID: #{p.id}</span>
+                <ArrowRight size={14} />
               </div>
-            ))
-          )}
+            </div>
+          ))}
         </div>
       </div>
     </div>
   );
 };
 
-// --- VIEW: TEAM DEVELOPER ---
 const DeveloperView = ({ stats, recentProjects, navigate }) => {
   const finalStats = getCleanStats(stats, recentProjects);
-
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -280,53 +254,29 @@ const DeveloperView = ({ stats, recentProjects, navigate }) => {
         <StatCardModern label="Selesai" value={finalStats.done} icon={<CheckCircle2 />} color="#22c55e" />
         <StatCardModern label="Overdue" value={finalStats.late} icon={<AlertCircle />} color="#ef4444" />
       </div>
-
       <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-amber-500 pl-4">
-            Antrean Tugas & Sprint Developer
-          </h3>
-          <button onClick={() => navigate('/projects')} className="text-xs font-black text-amber-600 hover:underline uppercase tracking-wider">
-            Buka Board
-          </button>
-        </div>
-
+        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-amber-500 pl-4 mb-6">Antrean Tugas Developer</h3>
         <div className="space-y-3">
-          {recentProjects.length === 0 ? (
-            <div className="text-center py-10 text-slate-400 text-xs font-bold uppercase">Tidak ada tugas teralokasikan.</div>
-          ) : (
-            recentProjects.map((p) => (
-              <div key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-2xl bg-slate-50 hover:bg-white border border-slate-100 hover:shadow-sm cursor-pointer transition-all gap-4 group">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center font-black border border-amber-100 group-hover:bg-amber-500 group-hover:text-white transition-all">
-                    {p.name?.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="font-black text-slate-800 text-sm">{p.name}</p>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5 flex items-center gap-1">
-                      <Clock size={12} /> Status Pengerjaan: <span className="text-slate-600">{p.status}</span>
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 self-end sm:self-auto">
-                  <span className="text-[9px] font-black uppercase tracking-wider px-3 py-1 bg-white border border-slate-200 rounded-lg text-slate-500">
-                    Buka Detail
-                  </span>
-                  <ArrowRight size={16} className="text-slate-400 group-hover:translate-x-1 transition-transform" />
+          {recentProjects.map((p) => (
+            <div key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="flex items-center justify-between p-5 rounded-2xl bg-slate-50 hover:bg-white border border-slate-100 cursor-pointer transition-all gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center font-black border border-amber-100">{p.name?.charAt(0).toUpperCase()}</div>
+                <div>
+                  <p className="font-black text-slate-800 text-sm">{p.name}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Status: {p.status}</p>
                 </div>
               </div>
-            ))
-          )}
+              <ArrowRight size={16} className="text-slate-400" />
+            </div>
+          ))}
         </div>
       </div>
     </div>
   );
 };
 
-// --- VIEW: PROJECT OWNER ---
 const ProjectOwnerView = ({ stats, recentProjects, navigate }) => {
   const finalStats = getCleanStats(stats, recentProjects);
-  
   const pieData = [
     { name: 'Hold', value: finalStats.hold, color: '#3b82f6' },
     { name: 'Progress', value: finalStats.progress, color: '#f59e0b' },
@@ -336,19 +286,12 @@ const ProjectOwnerView = ({ stats, recentProjects, navigate }) => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-      
-      {/* Kolom Kiri: Ringkasan Kartu Stats & Info Proteksi */}
       <div className="lg:col-span-5 flex flex-col gap-6">
-        <div className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem] flex items-start gap-4">
-          <ShieldAlert className="text-amber-600 flex-shrink-0 mt-0.5" size={20} />
-          <div>
-            <h4 className="text-xs font-black text-amber-800 uppercase tracking-wider">Mode Pemantauan Aktif</h4>
-            <p className="text-[11px] font-bold text-amber-600 leading-relaxed mt-1">
-              Sebagai Project Owner, Anda memiliki akses penuh untuk meninjau diagram metrik pengerjaan secara makro tanpa izin manipulasi data.
-            </p>
-          </div>
+        <div className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem]">
+          <ShieldAlert className="text-amber-600 mb-2" size={20} />
+          <h4 className="text-xs font-black text-amber-800 uppercase">Mode Pemantauan Aktif</h4>
+          <p className="text-[11px] font-bold text-amber-600 mt-1">Sebagai Project Owner, Anda memiliki akses penuh untuk meninjau diagram metrik.</p>
         </div>
-
         <div className="grid grid-cols-2 gap-4">
           <StatCardModern label="Total Proyek" value={finalStats.total} icon={<Package />} color="#ee1e2d" />
           <StatCardModern label="In Progress" value={finalStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
@@ -356,50 +299,36 @@ const ProjectOwnerView = ({ stats, recentProjects, navigate }) => {
           <StatCardModern label="Tertahan" value={finalStats.hold} icon={<FolderOpen />} color="#3b82f6" />
         </div>
       </div>
-
-      {/* Kolom Kanan: Chart Komposisi Progress */}
-      <div className="lg:col-span-7 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[400px]">
-        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-red-500 pl-4 mb-4">
-          Grafik Komposisi Progress Unit
-        </h3>
-        
-        {pieData.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-slate-400 text-xs font-bold uppercase">
-            Data grafik kosong atau belum termuat.
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-8">
-            <div className="w-full sm:w-1/2 h-[260px] flex items-center justify-center relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" innerRadius={75} outerRadius={100} paddingAngle={6} stroke="none" cornerRadius={6}>
-                    {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute flex flex-col items-center justify-center">
-                <span className="text-3xl font-black text-slate-800">{finalStats.total}</span>
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total</span>
-              </div>
+      <div className="lg:col-span-7 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
+        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-red-500 pl-4 mb-4">Grafik Komposisi Progress</h3>
+        <div className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-8">
+          <div className="w-full sm:w-1/2 h-[260px] flex items-center justify-center relative">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={pieData} dataKey="value" innerRadius={75} outerRadius={100} paddingAngle={6} stroke="none" cornerRadius={6}>
+                  {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute flex flex-col items-center justify-center">
+              <span className="text-3xl font-black text-slate-800">{finalStats.total}</span>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total</span>
             </div>
-
-            {/* Legend Kustom */}
-            <div className="w-full sm:w-1/2 space-y-2">
-              {pieData.map((item, index) => (
-                <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100/50">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider">{item.name}</span>
-                  </div>
-                  <span className="text-xs font-black text-slate-800">{item.value} Unit</span>
+          </div>
+          <div className="w-full sm:w-1/2 space-y-2">
+            {pieData.map((item, index) => (
+              <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100/50">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className="text-[11px] font-black text-slate-600 uppercase tracking-wider">{item.name}</span>
                 </div>
-              ))}
-            </div>
+                <span className="text-xs font-black text-slate-800">{item.value} Unit</span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
       </div>
-
     </div>
   );
 };

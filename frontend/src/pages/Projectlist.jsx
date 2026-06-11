@@ -32,23 +32,34 @@ const ProjectList = () => {
   const initialForm = {
     name: "",
     status: "hold",
-    start_date: "",
-    end_date: "",
-    label: "external",
+    label: "external", // Default value yang diwajibkan oleh database schema
   };
 
   const [formData, setFormData] = useState(initialForm);
 
   // ==========================
-  // DERIVED STATES & ALUR TRIAL
+  // DERIVED STATES & ALUR TRIAL (SINKRONISASI PLAN_ID SAAS)
   // ==========================
-  const currentPackage = (userData?.package_type || "FREE").toUpperCase();
-  const billingCycle = (userData?.billing_cycle || "").toUpperCase();
-  const isTrial = billingCycle === "TRIAL" && currentPackage === "PRO";
-  const hasExpiredTrial = userData?.expired_trial === true;
   
-  // 🔥 VALIDASI ROLE: Kebal dari masalah huruf besar/kecil (case-insensitive)
-  const isSuperAdmin = userData?.role?.toUpperCase() === "SUPERADMIN";
+  // ✨ FIX SAFELY: Mengonversi dan memetakan plan_id jika berupa angka/ID dari DB
+  const getPackageString = () => {
+    const rawPackage = userData?.plan_id || userData?.package_type || "FREE";
+    if (rawPackage === 1 || rawPackage === "1") return "FREE";
+    if (rawPackage === 2 || rawPackage === "2") return "PRO";
+    return String(rawPackage).toUpperCase();
+  };
+
+  const getBillingCycleString = () => {
+    return String(userData?.billing_cycle || "").toUpperCase();
+  };
+
+  const currentPackage = getPackageString(); 
+  const billingCycle = getBillingCycleString();
+  const isTrial = billingCycle === "TRIAL" && currentPackage === "PRO";
+  const hasExpiredTrial = userData?.expired_trial === true || userData?.expired_trial === 1;
+  
+  // VALIDASI ROLE: Diproteksi dengan String() agar aman dari error .toUpperCase()
+  const isSuperAdmin = String(userData?.role || "").toUpperCase() === "SUPERADMIN";
 
   // Aturan Batasan Pembuatan Project Baru
   const projectLimit = 1;
@@ -57,12 +68,11 @@ const ProjectList = () => {
   // Terkena limit jika paket FREE murni (dan project >= 1) ATAU eks-trial yang sudah kedaluwarsa
   const reachedLimit = (isFreePackage && projects.length >= projectLimit) || hasExpiredTrial;
 
-  // Hitung Sisa Hari Trial (Jika Sedang Aktif)
+  // Perhitungan Sisa Hari yang Akurat & Kebal Nilai Negatif
   const getRemainingDays = () => {
     if (!userData?.end_date) return 0;
-    const remaining = Math.ceil(
-      (new Date(userData.end_date) - new Date()) / (1000 * 60 * 60 * 24)
-    );
+    const diffTime = new Date(userData.end_date).getTime() - new Date().getTime();
+    const remaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return remaining > 0 ? remaining : 0;
   };
 
@@ -102,7 +112,7 @@ const ProjectList = () => {
   }, []);
 
   // ==========================
-  // ACTIONS (Kunci Validasi Fungsi)
+  // ACTIONS
   // ==========================
   const openCreate = () => {
     if (!isSuperAdmin) {
@@ -135,8 +145,6 @@ const ProjectList = () => {
     setFormData({
       name: project.name || "",
       status: project.status || "hold",
-      start_date: project.start_date || "",
-      end_date: project.end_date || "",
       label: project.label || "external",
     });
     setIsEdit(true);
@@ -149,12 +157,24 @@ const ProjectList = () => {
       showToast("Akses Ditolak: Anda tidak memiliki hak memproses data ini", "error");
       return;
     }
+
+    // Bersihkan Tenant ID dari localStorage
+    let cleanTenantId = userData?.tenant_id;
+    if (!cleanTenantId || cleanTenantId === "NULL" || cleanTenantId === null) {
+      cleanTenantId = 1; // Fallback ke master tenant default jika kosong
+    }
+
+    const payload = {
+      ...formData,
+      tenant_id: Number(cleanTenantId)
+    };
+
     try {
       if (isEdit) {
-        await api.put(`/projects/${selectedId}`, formData);
+        await api.put(`/projects/${selectedId}`, payload);
         showToast("Project berhasil diperbarui");
       } else {
-        await api.post("/projects", formData);
+        await api.post("/projects", payload);
         showToast("Project berhasil dibuat");
       }
       setIsModalOpen(false);
@@ -206,7 +226,7 @@ const ProjectList = () => {
       <div className="p-6">
         
         {/* BANNER TRIAL */}
-        {isTrial && (
+        {isTrial && remainingDays > 0 && (
           <div className={`mb-6 p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm ${
             remainingDays <= 3 
               ? "bg-red-50 border-red-200 text-red-900" 
@@ -273,7 +293,7 @@ const ProjectList = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               
-              {/* 🔥 BUTTON CARD: Sekarang terbungkus penuh & hanya tampil untuk SUPERADMIN murni */}
+              {/* BUTTON CARD */}
               {isSuperAdmin && (
                 <div className={`border border-gray-200 rounded-3xl h-[240px] flex flex-col items-center justify-center transition-all ${reachedLimit ? "bg-amber-50/50 border-amber-200 border-dashed" : "bg-white"}`}>
                   <h3 className="text-xl font-semibold mb-6">Buat Proyek Baru</h3>
@@ -309,7 +329,6 @@ const ProjectList = () => {
                   className="bg-white border border-gray-200 rounded-3xl overflow-hidden cursor-pointer hover:shadow-lg transition flex flex-col justify-between h-[240px]"
                 >
                   <div className="bg-red-50 h-16 relative">
-                    {/* 🔥 BUTTON TRASH: Hanya dirender di DOM untuk SUPERADMIN */}
                     {isSuperAdmin && (
                       <button
                         onClick={(e) => handleDelete(e, project.id)}
@@ -340,7 +359,6 @@ const ProjectList = () => {
                         {project.status === 'on_progress' ? 'progress' : project.status}
                       </span>
                       
-                      {/* 🔥 BUTTON EDIT: Hanya dirender di DOM untuk SUPERADMIN */}
                       {isSuperAdmin && (
                         <button
                           onClick={(e) => handleEdit(e, project)}
@@ -363,21 +381,37 @@ const ProjectList = () => {
       {/* FORM INPUT MODAL */}
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={isEdit ? "Edit Project" : "Tambah Project"}>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="text" required placeholder="Nama Project" value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-          />
-          <select
-            value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-            className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
-          >
-            <option value="hold">Hold</option>
-            <option value="on_progress">Progress</option>
-            <option value="done">Done</option>
-          </select>
-          <button className="w-full bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-semibold transition shadow-md">
-            {isEdit ? "Update Project" : "Buat Project"}
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Nama Project</label>
+            <input
+              type="text" required placeholder="Nama Project" value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-700 font-medium"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Status Kinerja</label>
+            <select
+              value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+              className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-700 font-medium"
+            >
+              <option value="hold">Hold</option>
+              <option value="on_progress">Progress</option>
+              <option value="done">Done</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Klasifikasi Label</label>
+            <select
+              value={formData.label} onChange={(e) => setFormData({ ...formData, label: e.target.value })}
+              className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-700 font-medium"
+            >
+              <option value="external">External (Klien)</option>
+              <option value="internal">Internal (Tim)</option>
+            </select>
+          </div>
+          <button className="w-full bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-semibold transition shadow-md pt-4">
+            {isEdit ? "Update Data Project" : "Terbitkan Project Baru"}
           </button>
         </form>
       </Modal>
@@ -387,7 +421,7 @@ const ProjectList = () => {
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="fixed inset-0" onClick={() => setUpgradeModal(false)}></div>
           
-          <div className="bg-white p-8 rounded-3xl max-w-md w-full relative z-10 shadow-2xl text-center animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white p-8 rounded-3xl max-w-md w-full relative z-10 shadow-2xl text-center">
             <div className="text-5xl mb-4">
               {modalReason === "trial_expired" ? "⚠️" : "🚀"}
             </div>

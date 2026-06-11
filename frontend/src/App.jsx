@@ -50,7 +50,7 @@ const ProtectedRoute = ({ children, user }) => {
 
 // ======================================================
 // 🛡️ ROLE BASED ROUTE GUARD (Pembatasan Hak Akses Admin)
-// Mencegah user biasa masuk ke halaman manajemen internal.
+// Mencegah user non-admin masuk ke halaman manajemen organisasi global.
 // ======================================================
 const AdminRoute = ({ children, userRole }) => {
   if (userRole !== 'superadmin') {
@@ -63,6 +63,7 @@ const AdminRoute = ({ children, userRole }) => {
 function App() {
   // ======================================================
   // USER STATE (Membaca data login dari LocalStorage)
+  // Termasuk role, tenant_id, dan plan_id untuk isolasi data
   // ======================================================
   const [user, setUser] = useState(() => {
     try {
@@ -73,7 +74,7 @@ function App() {
   });
 
   // ======================================================
-  // MONITOR LOGIN / LOGOUT (Sinkronisasi State Otomatis)
+  // MONITOR LOGIN / LOGOUT / BILLING STATUS (Sinkronisasi State)
   // ======================================================
   useEffect(() => {
     const syncUser = () => {
@@ -94,7 +95,7 @@ function App() {
     // Sinkronisasi jika user membuka aplikasi di banyak tab sekaligus
     window.addEventListener('storage', syncUser);
 
-    // Polling berkala setiap 1 detik untuk mendeteksi perubahan login secara realtime
+    // Polling berkala setiap 1 detik untuk mendeteksi perubahan login & paket secara realtime
     const interval = setInterval(syncUser, 1000);
 
     return () => {
@@ -158,6 +159,7 @@ function App() {
           <Route
             element={
               <ProtectedRoute user={user}>
+                {/* Melempar data user ke layout agar sidebar/navbar bisa mendeteksi tenant & plan */}
                 <MainLayout userData={user} />
               </ProtectedRoute>
             }
@@ -180,7 +182,7 @@ function App() {
               element={<ProjectDetail />}
             />
 
-            {/* BILLING & SUBSCRIPTION */}
+            {/* BILLING & SUBSCRIPTION (Khusus Pembelian Paket oleh Admin) */}
             <Route
               path="/billing"
               element={<Billing />}
@@ -214,7 +216,8 @@ function App() {
               }
             />
 
-            {/* 🌟 GITHUB INTEGRATIONS - KHUSUS SUPERADMIN ONLY */}
+            {/* 🌟 GITHUB INTEGRATIONS - MUTLAK KHUSUS SUPERADMIN ONLY 
+                Business Analyst (BA) tidak diizinkan mengakses jalur ini */}
             <Route
               path="/github-integrations"
               element={

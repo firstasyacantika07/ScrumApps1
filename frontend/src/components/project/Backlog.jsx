@@ -59,7 +59,8 @@ const Backlog = ({ projectId, currentRole }) => {
 
     try {
       if (isEditing) {
-        await api.put(`/projects/backlogs/${currentId}`, formData);
+        // 🛠️ PERBAIKAN: Menyesuaikan ke nested route utama backend
+        await api.put(`/projects/${projectId}/backlogs/${currentId}`, formData);
       } else {
         await api.post(`/projects/${projectId}/backlogs`, {
           ...formData,
@@ -79,11 +80,11 @@ const Backlog = ({ projectId, currentRole }) => {
     setCurrentId(item.id);
     setFormData({
       name: item.name || '',
-      description: item.description || '',
+      description: item.description || '', // ✨ FIX: Mencegah nilai null masuk ke textarea
       priority: item.priority || 'low',
       applicant: item.applicant || '',
       status: item.status || 'inactive',
-      sprint_id: item.sprint_id,
+      sprint_id: item.sprint_id || null,
       project_id: projectId,
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -97,7 +98,8 @@ const Backlog = ({ projectId, currentRole }) => {
 
     if (window.confirm("Hapus backlog ini secara permanen?")) {
       try {
-        await api.delete(`/projects/backlogs/${id}`);
+        // 🛠️ PERBAIKAN: Menyesuaikan ke nested route utama backend untuk aksi delete
+        await api.delete(`/projects/${projectId}/backlogs/${id}`);
         fetchBacklogs();
       } catch (err) {
         alert("Gagal menghapus data: " + (err.response?.data?.message || err.message));

@@ -35,21 +35,44 @@ const getIntegrationByProject = async (req, res, next) => {
 const createIntegrationRequest = async (req, res, next) => {
     try {
         const { projectId } = req.params;
-        const { github_owner, github_repo } = req.body;
+        let { github_owner, github_repo } = req.body;
         
         const requester_name = req.user?.name || req.user?.email || 'Super Admin';
 
         if (!github_owner || !github_repo) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Nama pemilik (owner) and nama repositori GitHub wajib diisi.' 
+                message: 'Nama pemilik (owner) dan nama repositori GitHub wajib diisi.' 
+            });
+        }
+
+        // 1. Trimming input untuk mencegah spasi tidak disengaja
+        github_owner = github_owner.trim();
+        github_repo = github_repo.trim();
+
+        // 🌟 Validasi adaptif untuk membedakan antara Full URL Clone vs Nama Repo literal
+        if (github_repo.startsWith('http') || github_repo.includes('github.com')) {
+            github_repo = github_repo.split('/').pop();
+            github_repo = github_repo.replace(/\.git$/i, '');
+        }
+
+        // 2. Proteksi pencegahan duplikasi pengajuan yang sedang aktif/pending
+        const [existing] = await db.query(
+            'SELECT id, status FROM tbr_github_integrations WHERE project_id = ? AND status IN ("Pending", "Active") LIMIT 1',
+            [projectId]
+        );
+
+        if (existing.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Proyek ini sudah memiliki integrasi dengan status ${existing[0].status}.`
             });
         }
 
         const repository_url = `https://github.com/${github_owner}/${github_repo}`;
 
         await db.query(
-            'INSERT INTO tbr_github_integrations (project_id, requester_name, github_owner, github_repo, repository_url, status) VALUES (?, ?, ?, ?, ?, "PENDING")',
+            'INSERT INTO tbr_github_integrations (project_id, requester_name, github_owner, github_repo, repository_url, status) VALUES (?, ?, ?, ?, ?, "Pending")',
             [projectId, requester_name, github_owner, github_repo, repository_url]
         );
 
@@ -81,7 +104,8 @@ const getGitHubOAuthUrl = async (req, res, next) => {
         const client_id = process.env.GITHUB_CLIENT_ID;
         const redirect_uri = encodeURIComponent(process.env.GITHUB_REDIRECT_URI);
         
-        const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&state=${request_id}&scope=repo,admin:repo_hook`;
+        // 🌟 FIX: Mengubah pemisah scope dari koma (,) menjadi spasi URL-encoded (%20) sesuai standar OAuth2 GitHub
+        const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&state=${request_id}&scope=repo%20admin:repo_hook`;
 
         return res.status(200).json({ url: githubAuthUrl });
     } catch (error) {
@@ -99,6 +123,7 @@ const getAllIntegrationRequests = async (req, res, next) => {
         const query = `
             SELECT 
                 gi.id, 
+                gi.project_id, 
                 p.name AS project_name, 
                 gi.requester_name, 
                 gi.github_owner AS repository_owner, 
@@ -130,7 +155,7 @@ const rejectIntegrationRequest = async (req, res, next) => {
         const { id } = req.params;
         
         const [result] = await db.query(
-            'UPDATE tbr_github_integrations SET status = "REJECTED" WHERE id = ?',
+            'UPDATE tbr_github_integrations SET status = "Rejected" WHERE id = ?',
             [id]
         );
 
@@ -153,7 +178,10 @@ const disconnectGitHub = async (req, res, next) => {
     try {
         const { id } = req.params;
         
-        const [integration] = await db.query('SELECT project_id, github_owner, github_repo FROM tbr_github_integrations WHERE id = ?', [id]);
+        const [integration] = await db.query(
+            'SELECT project_id, github_owner, github_repo FROM tbr_github_integrations WHERE id = ?', 
+            [id]
+        );
         
         if (integration.length === 0) {
             return res.status(404).json({ success: false, message: 'Data integrasi tidak ditemukan.' });
@@ -162,12 +190,19 @@ const disconnectGitHub = async (req, res, next) => {
         const projectId = integration[0].project_id;
         const repoName = `${integration[0].github_owner}/${integration[0].github_repo}`;
 
-        await db.query('DELETE FROM tbr_github_integrations WHERE id = ?', [id]);
-
         await db.query(
-            'INSERT INTO tbr_project_logs (project_id, activity, user_name) VALUES (?, ?, ?)',
-            [projectId, `Memutuskan koneksi repositori GitHub (${repoName}) dari proyek.`, req.user?.name || 'Super Admin']
+            'UPDATE tbr_github_integrations SET status = "Rejected", access_token = NULL WHERE id = ?', 
+            [id]
         );
+
+        try {
+            await db.query(
+                'INSERT INTO tbr_project_logs (project_id, activity, user_name) VALUES (?, ?, ?)',
+                [projectId, `Memutuskan koneksi repositori GitHub (${repoName}) dari proyek.`, req.user?.name || 'Super Admin']
+            );
+        } catch (logError) {
+            console.warn('⚠️ Gagal menulis log ke tbr_project_logs:', logError.message);
+        }
 
         return res.status(200).json({ success: true, message: 'Koneksi repositori berhasil diputuskan.' });
     } catch (error) {
@@ -209,7 +244,7 @@ const handleGitHubCallback = async (req, res, next) => {
         }
 
         const [result] = await db.query(
-            'UPDATE tbr_github_integrations SET status = "ACTIVE", access_token = ? WHERE id = ?',
+            'UPDATE tbr_github_integrations SET status = "Active", access_token = ? WHERE id = ?',
             [accessToken, state]
         );
 
@@ -225,10 +260,6 @@ const handleGitHubCallback = async (req, res, next) => {
     }
 };
 
-/* ==========================================================================
- * 🌟 TAMBAHAN BARU: FUNGSI AKSES BA, DEVELOPER, & PROJECT OWNER (MATRIKS BARU)
- * ========================================================================== */
-
 /**
  * 8. Mengambil aktivitas commit terbaru dari repo yang aktif
  * GET /api/projects/:projectId/github-activity
@@ -238,7 +269,7 @@ const getRepoActivity = async (req, res, next) => {
         const { projectId } = req.params;
 
         const [integrations] = await db.query(
-            'SELECT github_owner, github_repo, access_token FROM tbr_github_integrations WHERE project_id = ? AND status = "ACTIVE" LIMIT 1',
+            'SELECT github_owner, github_repo, access_token FROM tbr_github_integrations WHERE project_id = ? AND status = "Active" LIMIT 1',
             [projectId]
         );
 
@@ -253,7 +284,8 @@ const getRepoActivity = async (req, res, next) => {
             {
                 headers: {
                     Authorization: `token ${access_token}`,
-                    Accept: 'application/vnd.github.v3+json'
+                    Accept: 'application/vnd.github.v3+json',
+                    'User-Agent': 'ScrumApps-Backend'
                 }
             }
         );
@@ -274,7 +306,7 @@ const getRepoActivity = async (req, res, next) => {
 };
 
 /**
- * 9. Menyelaraskan (Sync) Backlog dengan GitHub Issues (Akses: BA & Superadmin)
+ * 9. Menyelaraskan (Sync) Backlog dengan GitHub Issues
  * POST /api/projects/:projectId/github-sync-backlog
  */
 const syncBacklogWithGitHub = async (req, res, next) => {
@@ -282,7 +314,7 @@ const syncBacklogWithGitHub = async (req, res, next) => {
         const { projectId } = req.params;
 
         const [integrations] = await db.query(
-            'SELECT github_owner, github_repo, access_token FROM tbr_github_integrations WHERE project_id = ? AND status = "ACTIVE" LIMIT 1',
+            'SELECT github_owner, github_repo, access_token FROM tbr_github_integrations WHERE project_id = ? AND status = "Active" LIMIT 1',
             [projectId]
         );
 
@@ -291,16 +323,19 @@ const syncBacklogWithGitHub = async (req, res, next) => {
         }
 
         const { github_owner, github_repo, access_token } = integrations[0];
-
-        // Ambil data backlog internal yang belum ter-push ke GitHub
         const [backlogs] = await db.query('SELECT id, title, description FROM tbr_backlogs WHERE project_id = ?', [projectId]);
 
-        // Simulasi push ke GitHub Issues (Looping/Batch Create)
         for (const backlog of backlogs) {
             await axios.post(
                 `https://api.github.com/repos/${github_owner}/${github_repo}/issues`,
                 { title: backlog.title, body: backlog.description || 'Synced from ScrumApps Backlog' },
-                { headers: { Authorization: `token ${access_token}`, Accept: 'application/vnd.github.v3+json' } }
+                { 
+                    headers: { 
+                        Authorization: `token ${access_token}`, 
+                        Accept: 'application/vnd.github.v3+json',
+                        'User-Agent': 'ScrumApps-Backend'
+                    } 
+                }
             );
         }
 
@@ -320,39 +355,81 @@ const configureWebhook = async (req, res, next) => {
         const { projectId } = req.params;
         
         const [integrations] = await db.query(
-            'SELECT id, github_owner, github_repo, access_token FROM tbr_github_integrations WHERE project_id = ? AND status = "ACTIVE" LIMIT 1',
+            'SELECT id, github_owner, github_repo, access_token FROM tbr_github_integrations WHERE project_id = ? AND status = "Active" LIMIT 1',
             [projectId]
         );
 
         if (integrations.length === 0) {
-            return res.status(404).json({ success: false, message: 'Integrasi repositori tidak ditemukan.' });
+            return res.status(404).json({ success: false, message: 'Integrasi repositori tidak ditemukan atau status belum Active.' });
         }
 
         const { github_owner, github_repo, access_token } = integrations[0];
         
-        // URL Backend endpoint kamu yang siap menerima kiriman event dari GitHub
-        const webhookUrl = `${process.env.BACKEND_APP_URL || 'http://localhost:5000'}/api/projects/${projectId}/github-link-action`;
+        const baseUrl = process.env.BACKEND_APP_URL || 'http://localhost:5000';
+        const webhookUrl = `${baseUrl}/api/projects/${projectId}/github-link-action`;
 
-        const githubResponse = await axios.post(
-            `https://api.github.com/repos/${github_owner}/${github_repo}/hooks`,
-            {
-                name: 'web',
-                active: true,
-                events: ['push', 'pull_request'],
-                config: { url: webhookUrl, content_type: 'json', inbound_auth: 'none' }
-            },
-            { headers: { Authorization: `token ${access_token}`, Accept: 'application/vnd.github.v3+json' } }
-        );
+        try {
+            const githubResponse = await axios.post(
+                `https://api.github.com/repos/${github_owner}/${github_repo}/hooks`,
+                {
+                    name: 'web',
+                    active: true,
+                    events: ['push', 'pull_request'],
+                    config: { 
+                        url: webhookUrl, 
+                        content_type: 'json', 
+                        inbound_auth: 'none' 
+                    }
+                },
+                { 
+                    headers: { 
+                        Authorization: `token ${access_token}`, 
+                        Accept: 'application/vnd.github.v3+json',
+                        'User-Agent': 'ScrumApps-Backend' // 🌟 Diperlukan agar GitHub API mengenali agen pemanggil
+                    } 
+                }
+            );
 
-        return res.status(200).json({ success: true, message: 'GitHub Webhook berhasil dikonfigurasi otomatis!', data: githubResponse.data });
+            return res.status(200).json({ 
+                success: true, 
+                message: 'GitHub Webhook berhasil dikonfigurasi otomatis!', 
+                data: githubResponse.data 
+            });
+
+        } catch (githubError) {
+            console.error('❌ GitHub API Error Detail:', githubError.response?.data || githubError.message);
+            
+            const githubResponseError = githubError.response?.data?.errors?.[0]?.message || '';
+            const mainMessage = githubError.response?.data?.message || '';
+
+            if (githubResponseError.includes('already exists') || mainMessage.includes('Validation Failed')) {
+                return res.status(409).json({ 
+                    success: false, 
+                    message: 'Webhook sudah terdaftar di repositori GitHub ini. Tidak perlu sinkronisasi ulang.' 
+                });
+            }
+
+            if (githubError.response?.status === 401 || githubError.response?.status === 403 || githubError.response?.status === 404) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Otorisasi gagal atau Repositori tidak ditemukan. Pastikan token valid, berstatus publik, atau akun Anda memliki akses admin/owner di organisasi repositori tersebut.'
+                });
+            }
+
+            return res.status(githubError.response?.status || 400).json({
+                success: false,
+                message: `GitHub API Error: ${mainMessage}. ${githubResponseError}`
+            });
+        }
+
     } catch (error) {
-        console.error('🔥 Error di configureWebhook:', error.response?.data || error.message);
-        return res.status(500).json({ success: false, message: 'Gagal mendaftarkan webhook di repositori GitHub.' });
+        console.error('🔥 Error Internal di configureWebhook:', error.message);
+        return res.status(500).json({ success: false, message: 'Sistem internal gagal memproses konfigurasi webhook.' });
     }
 };
 
 /**
- * 11. Mengelola / Memperbarui Personal Access Token (PAT) secara Manual (Akses: Superadmin)
+ * 11. Mengelola / Memperbarui Personal Access Token (PAT) secara Manual
  * POST /api/projects/:projectId/github-pat
  */
 const managePAT = async (req, res, next) => {
@@ -365,7 +442,7 @@ const managePAT = async (req, res, next) => {
         }
 
         const [result] = await db.query(
-            'UPDATE tbr_github_integrations SET access_token = ?, status = "ACTIVE" WHERE project_id = ?',
+            'UPDATE tbr_github_integrations SET access_token = ?, status = "Active" WHERE project_id = ?',
             [personal_access_token, projectId]
         );
 
@@ -381,20 +458,23 @@ const managePAT = async (req, res, next) => {
 };
 
 /**
- * 12. Menghubungkan Akun Personal GitHub Developer (Akses: Developer)
+ * 12. Menghubungkan Akun Personal GitHub Developer
  * POST /api/projects/github/connect-personal
  */
 const connectPersonalAccount = async (req, res, next) => {
     try {
         const { github_username } = req.body;
-        const userId = req.user.id;
+        const userId = req.user?.id;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: 'User tidak terotentikasi.' });
+        }
 
         if (!github_username) {
             return res.status(400).json({ success: false, message: 'Username GitHub personal diperlukan.' });
         }
 
-        // Simpan username git dev ke tabel tbr_users agar sistem mengenali siapa yang melakukan commit
-        await db.query('UPDATE tbr_users SET github_username = ? WHERE id = ?', [github_username, userId]);
+        await db.query('UPDATE tbr_users SET github_username = ? WHERE id = ?', [github_username.trim(), userId]);
 
         return res.status(200).json({ success: true, message: 'Akun personal GitHub berhasil ditautkan ke profil developer Anda.' });
     } catch (error) {
@@ -404,7 +484,7 @@ const connectPersonalAccount = async (req, res, next) => {
 };
 
 /**
- * 13. Webhook Receiver: Menghubungkan Commit/PR & Auto Update Kanban (Akses: Publik dari GitHub Event)
+ * 13. Webhook Receiver: Menghubungkan Commit/PR & Auto Update Kanban
  * POST /api/projects/:projectId/github-link-action
  */
 const linkGitActionToKanban = async (req, res, next) => {
@@ -412,24 +492,24 @@ const linkGitActionToKanban = async (req, res, next) => {
         const { commits, pull_request, action } = req.body;
         let commitMessage = '';
 
-        // Kasus A: Deteksi Event Push Commit
         if (commits && commits.length > 0) {
-            commitMessage = commits[0].message; // Ambil pesan commit terbaru
+            commitMessage = commits[0].message; 
         } 
-        // Kasus B: Deteksi Event Pull Request yang baru di-merge (ditutup dan sukses digabung)
         else if (pull_request && action === 'closed' && pull_request.merged === true) {
             commitMessage = pull_request.title;
         }
 
+        if (!commitMessage) {
+            return res.status(200).json({ success: true, message: 'Webhook received but no action required (Ping / Non-tracked event).' });
+        }
+
         console.log('📬 Webhook masuk dengan pesan git:', commitMessage);
 
-        // Cari ID Task di dalam string menggunakan regex (Contoh format pesan: "[Task-45] Fix issue auth")
         const match = commitMessage.match(/\[Task-(\d+)\]/i);
 
         if (match) {
             const taskId = match[1];
             
-            // Lakukan pembaruan status Kanban otomatis ke database internal aplikasi ScrumApps
             const [updateResult] = await db.query(
                 "UPDATE tbr_developments SET status = 'DONE' WHERE id = ?", 
                 [taskId]
@@ -440,7 +520,6 @@ const linkGitActionToKanban = async (req, res, next) => {
             }
         }
 
-        // GitHub mewajibkan kita merespons cepat dengan status 200
         return res.status(200).json({ success: true, message: 'Webhook payload berhasil diproses.' });
     } catch (error) {
         console.error('🔥 Error di linkGitActionToKanban Webhook:', error.message);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { EyeOff, Eye } from 'lucide-react';
+import { GoogleLogin } from '@react-oauth/google'; // 🌟 Import Google Login Component
 import api from '../api/axios';
 
 const Login = () => {
@@ -12,28 +13,69 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
+  // 🔐 HANDLER 1: Login Form Biasa (Email & Password)
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    
     if (!email || !password) {
-      alert("Email dan password wajib diisi");
+      setError("Email dan password wajib diisi");
       return;
     }
     setIsLoading(true);
 
-    console.log("Mencoba login dengan:", email);
-
     try {
-      const response = await api.post('/auth/login', { email, password });
+      const response = await api.post('/auth/login', { 
+        email, 
+        password,
+        rememberMe 
+      });
+
+      if (response.data?.token) {
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+        
+        if (rememberMe) {
+          localStorage.setItem('remembered_email', email);
+        } else {
+          localStorage.removeItem('remembered_email');
+        }
+
+        navigate('/dashboard');
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || "Login gagal, silakan cek kembali email dan password Anda.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 🌐 HANDLER 2: Sukses Otentikasi Google Frontend -> Kirim ke Backend
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setError('');
+    setIsLoading(true);
+    
+    try {
+      // Mengirim token 'credential' dari Google ke backend untuk diverifikasi & diterbitkan JWT internal
+      const response = await api.post('/auth/google', {
+        token: credentialResponse.credential
+      });
+
       if (response.data?.token) {
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
         navigate('/dashboard');
       }
     } catch (err) {
-      alert(err.response?.data?.message || "Login gagal, cek email/password");
+      setError(err.response?.data?.message || "Gagal sinkronisasi akun Google dengan server internal.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // ⚠️ HANDLER 3: Gagal Otentikasi Pop-up Google
+  const handleGoogleError = () => {
+    setError("Otentikasi Google dibatalkan atau gagal berjalan.");
   };
 
   return (
@@ -41,12 +83,10 @@ const Login = () => {
       
       {/* KIRI: Sisi Visual Merah (Brand Area) */}
       <div className="hidden lg:flex flex-1 bg-[#D31217] items-center justify-center p-12 relative overflow-hidden">
-        {/* Dekorasi Background */}
         <div className="absolute w-96 h-96 bg-white/5 rounded-full -top-20 -left-20"></div>
         <div className="absolute w-64 h-64 bg-white/5 rounded-full -bottom-10 -right-10"></div>
         
         <div className="relative z-10 text-center">
-          {/* Ikon Centang & Kalender sesuai Gambar 2 */}
           <div className="w-80 h-80 bg-white/10 rounded-[50px] flex items-center justify-center mb-10 mx-auto border border-white/20 shadow-2xl backdrop-blur-md">
              <div className="w-44 h-44 bg-white rounded-full flex items-center justify-center shadow-2xl relative">
                 <div className="absolute -top-2 -right-2 w-16 h-16 bg-[#D31217] rounded-full flex items-center justify-center border-[6px] border-white shadow-lg">
@@ -65,7 +105,6 @@ const Login = () => {
           </p>
         </div>
         
-        {/* Blur Circles using Tailwind */}
         <div className="absolute rounded-full blur-[100px] z-0 w-[400px] h-[400px] bg-white/15 -top-[150px] -left-[100px]"></div>
         <div className="absolute rounded-full blur-[100px] z-0 w-[500px] h-[500px] bg-black/10 -bottom-[200px] -right-[100px]"></div>
       </div>
@@ -77,6 +116,13 @@ const Login = () => {
             <h2 className="text-4xl font-extrabold text-slate-900 mb-2">Masuk</h2>
             <p className="text-slate-500 font-medium">Gunakan akun ScrumApps Anda.</p>
           </div>
+
+          {/* Alert Error Message */}
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold shadow-sm animate-fade-in">
+              {error}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
@@ -113,7 +159,12 @@ const Login = () => {
 
             <div className="flex items-center px-1">
               <label className="flex items-center gap-3 text-sm text-slate-500 cursor-pointer group">
-                <input type="checkbox" className="w-5 h-5 rounded border-slate-300 text-[#D31217] focus:ring-[#D31217] cursor-pointer" />
+                <input 
+                  type="checkbox" 
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-5 h-5 rounded border-slate-300 text-[#D31217] focus:ring-[#D31217] cursor-pointer" 
+                />
                 <span className="group-hover:text-slate-800 transition-colors font-medium">Ingat saya</span>
               </label>
             </div>
@@ -137,23 +188,18 @@ const Login = () => {
             </div>
           </div>
 
-          {/* --- TOMBOL GOOGLE LOGIN --- */}
-          <button
-            type="button"
-            onClick={() => {
-              // Logika integrasi Google Auth Anda di sini
-              console.log("Login Google diklik");
-            }}
-            className="w-full py-4 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl font-bold text-base hover:bg-slate-50 hover:border-slate-200 active:scale-95 transition-all flex items-center justify-center gap-3 shadow-sm"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path
-                fill="#EA4335"
-                d="M12.48 10.92v3.28h7.84c-.24 1.84-.908 3.152-1.928 4.176-1.224 1.224-3.136 2.552-6.792 2.552-5.624 0-10.064-4.576-10.064-10.2s4.44-10.2 10.064-10.2c3.112 0 5.392 1.224 7.072 2.816l2.32-2.32c-1.976-1.872-4.592-3.296-9.392-3.296-8.28 0-15 6.72-15 15s6.72 15 15 15c4.472 0 7.84-1.472 10.424-4.176 2.68-2.68 3.536-6.448 3.536-9.424 0-.896-.08-1.744-.24-2.552H12.48z"
-              />
-            </svg>
-            Masuk dengan Google
-          </button>
+          {/* --- TOMBOL GOOGLE LOGIN AKTIF --- */}
+          <div className="w-full flex justify-center GoogleLoginWrapper">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={handleGoogleError}
+              theme="outline"
+              size="large"
+              shape="pill"
+              width="400px" // Lebar disesuaikan agar full-width match dengan form input
+              locale="id"
+            />
+          </div>
           
           <p className="mt-20 text-slate-300 text-[10px] text-center uppercase tracking-[4px] font-bold italic">
             ScrumApps Project Management Tool
