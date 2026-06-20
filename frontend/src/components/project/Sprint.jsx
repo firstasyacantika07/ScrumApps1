@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { 
-  Search, Calendar, Trash2, Edit3, Plus
+  Search, Calendar, Trash2, Edit3, Plus, ClipboardCheck, History
 } from 'lucide-react';
 import api from '../../api/axios';
 import Modal from '../ui/Modal';
@@ -13,16 +13,16 @@ const Sprint = ({ projectId, currentRole }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState(null);
   
-  // State untuk Form sesuai struktur tabel tbr_sprints
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     start_date: '',
     end_date: '',
-    status: 'planned'
+    status: 'planned',
+    result_review: '',
+    result_retrospective: ''
   });
 
-  // Menyelaraskan dengan format token UPPERCASE dari sistem otorisasi ScrumApps
   const isSuperAdmin = currentRole === 'SUPERADMIN';
   const isBA = currentRole === 'BUSINESSANALYST';
   const hasWriteAccess = isSuperAdmin || isBA;
@@ -43,24 +43,76 @@ const Sprint = ({ projectId, currentRole }) => {
     }
   };
 
-  // Helper untuk mengubah format ISO Date (string panjang) menjadi YYYY-MM-DD agar bisa dibaca input date
+  // PENGAMAN TANGGAL INPUT: Cegah crash format 0000-00-00 dan typo tahun di bawah era modern
   const formatDateForInput = (dateString) => {
-    if (!dateString) return '';
-    return dateString.split('T')[0];
+    if (!dateString || dateString.startsWith('0000') || dateString.startsWith('00')) return '';
+    if (dateString.includes('T')) return dateString.split('T')[0];
+    return dateString.split(' ')[0];
+  };
+
+  // PENGAMAN TANGGAL VIEW: Menampilkan text alternatif jika tanggal tidak rasional
+  const formatHumanDate = (dateString) => {
+    if (!dateString || dateString.startsWith('0000')) return '-';
+    
+    // Pecah string untuk cek tahun (mengantisipasi typo tahun seperti 0226)
+    const yearCheck = parseInt(dateString.split('-')[0], 10);
+    if (isNaN(yearCheck) || yearCheck < 1970 || yearCheck > 2100) {
+      return `Format Tidak Valid (${dateString.split(' ')[0]})`;
+    }
+
+    const dateObj = new Date(dateString);
+    if (isNaN(dateObj.getTime())) return '-';
+
+    return dateObj.toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  };
+
+  const getStatusStyles = (status) => {
+    const cleanStatus = status?.toLowerCase() || 'planned';
+    switch (cleanStatus) {
+      case 'active':
+        return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+      case 'completed':
+        return 'bg-blue-50 text-blue-600 border-blue-100';
+      case 'planned':
+      default:
+        return 'bg-amber-50 text-amber-600 border-amber-100';
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!hasWriteAccess) {
-      alert("Akses Ditolak: Anda tidak memiliki otoritas mengubah siklus sprint.");
+      alert("Akses Ditolak: Anda tidak memiliki otoritas mengubah data sprint.");
+      return;
+    }
+
+    if (!formData.start_date || !formData.end_date) {
+      alert("Kesalahan Input: Tanggal mulai dan selesai wajib diisi.");
+      return;
+    }
+
+    if (new Date(formData.start_date) > new Date(formData.end_date)) {
+      alert("Kesalahan Batas Waktu: Tanggal selesai tidak boleh lebih awal dari tanggal mulai.");
       return;
     }
 
     try {
+      const payload = {
+        ...formData,
+        // Konversi string kosong status kembali ke default planned/clean jika diperlukan backend
+        status: formData.status || 'planned',
+        result_review: formData.status === 'completed' ? formData.result_review : null,
+        result_retrospective: formData.status === 'completed' ? formData.result_retrospective : null
+      };
+
       if (isEditing) {
-        await api.put(`/projects/${projectId}/sprints/${currentId}`, formData);
+        await api.put(`/projects/${projectId}/sprints/${currentId}`, payload);
       } else {
-        await api.post(`/projects/${projectId}/sprints`, formData);
+        await api.post(`/projects/${projectId}/sprints`, payload);
       }
       setIsModalOpen(false);
       resetForm();
@@ -76,9 +128,11 @@ const Sprint = ({ projectId, currentRole }) => {
     setFormData({
       name: item.name || '',
       description: item.description || '',
-      start_date: formatDateForInput(item.start_date), // ✨ FIX: Mencegah input date crash karena format ISO
-      end_date: formatDateForInput(item.end_date),     // ✨ FIX: Memotong string tanggal menjadi YYYY-MM-DD
-      status: item.status || 'planned'
+      start_date: formatDateForInput(item.start_date),
+      end_date: formatDateForInput(item.end_date),
+      status: item.status || 'planned', 
+      result_review: item.result_review || '',
+      result_retrospective: item.result_retrospective || ''
     });
     setIsModalOpen(true);
   };
@@ -91,7 +145,6 @@ const Sprint = ({ projectId, currentRole }) => {
 
     if (window.confirm("Hapus sprint ini secara permanen?")) {
       try {
-        // 🛠️ PERBAIKAN: Menembak nested route spesifik milik project ID bersangkutan
         await api.delete(`/projects/${projectId}/sprints/${id}`);
         fetchSprints();
       } catch (err) {
@@ -104,47 +157,53 @@ const Sprint = ({ projectId, currentRole }) => {
   const resetForm = () => {
     setIsEditing(false);
     setCurrentId(null);
-    setFormData({ name: '', description: '', start_date: '', end_date: '', status: 'planned' });
+    setFormData({ 
+      name: '', 
+      description: '', 
+      start_date: '', 
+      end_date: '', 
+      status: 'planned',
+      result_review: '',
+      result_retrospective: ''
+    });
   };
 
-  // Filter Pencarian
   const filteredSprints = sprints.filter(s => 
     s.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-sm overflow-hidden">
         
         {/* Header Modul */}
-        <div className="p-6 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="p-8 border-b border-gray-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Daftar Sprint</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Kelola siklus pengerjaan (sprint) untuk proyek ini.
+            <h2 className="text-xl font-black text-gray-900 tracking-tight">Daftar Sprint</h2>
+            <p className="text-xs font-medium text-gray-400 mt-1">
+              Kelola siklus pengerjaan, evaluasi sprint review, dan catatan retrospective.
             </p>
           </div>
 
           {/* Kontrol Pencarian & Tombol Tambah */}
           <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
             <div className="relative w-full sm:max-w-sm">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
               <input 
                 type="text" 
                 placeholder="Cari nama sprint..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-11 pr-4 py-2.5 border border-gray-100 rounded-xl bg-gray-50 text-sm focus:ring-2 focus:ring-blue-100 outline-none transition"
+                className="w-full pl-11 pr-4 py-2.5 border border-gray-100 rounded-2xl bg-gray-50 text-xs font-semibold focus:ring-2 focus:ring-blue-50/50 outline-none transition"
               />
             </div>
 
-            {/* Tombol Tambah Sprint Baru berdasarkan Hak Akses */}
             {hasWriteAccess && (
               <button
                 onClick={() => { resetForm(); setIsModalOpen(true); }}
-                className="flex items-center justify-center gap-2 w-full sm:w-auto bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-100 hover:bg-blue-700 transition active:scale-[0.98] shrink-0"
+                className="flex items-center justify-center gap-2 w-full sm:w-auto bg-blue-600 text-white px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-100 hover:bg-blue-700 transition active:scale-[0.98] shrink-0"
               >
-                <Plus size={16} /> New Sprint
+                <Plus size={14} /> New Sprint
               </button>
             )}
           </div>
@@ -153,57 +212,69 @@ const Sprint = ({ projectId, currentRole }) => {
         {/* Tabel Data Sprint */}
         <div className="overflow-x-auto min-h-[350px]">
           <table className="w-full text-left border-collapse">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr className="text-gray-500 text-[11px] font-bold uppercase tracking-wider">
-                <th className="px-6 py-4">No</th>
-                <th className="px-6 py-4">Nama Sprint</th>
+            <thead className="bg-gray-50/50 border-b border-gray-100">
+              <tr className="text-gray-400 text-[10px] font-black uppercase tracking-widest">
+                <th className="px-8 py-4 w-16">No</th>
+                <th className="px-6 py-4">Nama Sprint & Catatan</th>
                 <th className="px-6 py-4">Durasi</th>
                 <th className="px-6 py-4">Status</th>
-                {hasWriteAccess && <th className="px-6 py-4 text-center">Aksi</th>}
+                {hasWriteAccess && <th className="px-8 py-4 text-center w-32">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading ? (
                 <tr>
-                  <td colSpan={hasWriteAccess ? 5 : 4} className="text-center py-20 text-gray-400 font-medium text-sm animate-pulse">
+                  <td colSpan={hasWriteAccess ? 5 : 4} className="text-center py-24 text-gray-400 font-bold text-xs uppercase tracking-widest animate-pulse">
                     Memuat siklus sprint...
                   </td>
                 </tr>
               ) : filteredSprints.length > 0 ? (
                 filteredSprints.map((sprint, index) => (
-                  <tr key={sprint.id} className="hover:bg-gray-50/50 transition group">
-                    <td className="px-6 py-4 text-sm text-gray-600">{index + 1}</td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-semibold text-gray-800">{sprint.name}</div>
-                      <div className="text-xs text-gray-400 truncate max-w-[240px] mt-0.5">{sprint.description || 'Tidak ada deskripsi'}</div>
+                  <tr key={sprint.id} className="hover:bg-gray-50/30 transition group">
+                    <td className="px-8 py-5 text-xs font-bold text-gray-400">{index + 1}</td>
+                    <td className="px-6 py-5">
+                      <div className="text-sm font-bold text-gray-800 tracking-tight">{sprint.name || `Sprint ID: ${sprint.id}`}</div>
+                      <div className="text-xs font-medium text-gray-400 truncate max-w-[340px] mt-0.5">{sprint.description || 'Tidak ada deskripsi'}</div>
+                      
+                      {/* Indikator review & retrospective */}
+                      {(sprint.result_review || sprint.result_retrospective) && (
+                        <div className="flex items-center gap-3 mt-2 pt-1.5 border-t border-dashed border-gray-100">
+                          {sprint.result_review && (
+                            <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium bg-emerald-50/60 px-1.5 py-0.5 rounded-md">
+                              <ClipboardCheck size={11} /> Review OK
+                            </span>
+                          )}
+                          {sprint.result_retrospective && (
+                            <span className="flex items-center gap-1 text-[10px] text-purple-600 font-medium bg-purple-50/60 px-1.5 py-0.5 rounded-md">
+                              <History size={11} /> Retro OK
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
-                      <div className="flex items-center gap-1.5 font-medium">
+                    <td className="px-6 py-5 text-xs text-gray-500">
+                      <div className="flex items-center gap-1.5 font-bold text-gray-700">
                         <Calendar size={13} className="text-gray-400"/> 
-                        {sprint.start_date ? new Date(sprint.start_date).toLocaleDateString('id-ID') : '-'}
+                        {formatHumanDate(sprint.start_date)}
                       </div>
-                      <div className="text-[11px] text-gray-400 ml-5 mt-0.5">
-                        s/d {sprint.end_date ? new Date(sprint.end_date).toLocaleDateString('id-ID') : '-'}
+                      <div className="text-[10px] font-bold text-gray-400 ml-5 mt-0.5 uppercase tracking-wide">
+                        s/d {formatHumanDate(sprint.end_date)}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                        sprint.status === 'active' ? 'bg-blue-50 text-blue-600' : 
-                        sprint.status === 'completed' ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'
-                      }`}>
-                        {sprint.status}
+                    <td className="px-6 py-5">
+                      <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest border ${getStatusStyles(sprint.status)}`}>
+                        {sprint.status || 'planned'}
                       </span>
                     </td>
                     
-                    {/* Aksi Baris Data */}
                     {hasWriteAccess && (
-                      <td className="px-6 py-4">
-                        <div className="flex justify-center gap-1 transition-all duration-200">
-                          <button onClick={() => handleEditClick(sprint)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Edit Sprint">
-                            <Edit3 size={15}/>
+                      <td className="px-8 py-5">
+                        <div className="flex justify-center gap-1">
+                          <button onClick={() => handleEditClick(sprint)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50/50 rounded-xl transition" title="Edit Sprint">
+                            <Edit3 size={14}/>
                           </button>
-                          <button onClick={() => handleDelete(sprint.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Hapus Sprint">
-                            <Trash2 size={15}/>
+                          <button onClick={() => handleDelete(sprint.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50/50 rounded-xl transition" title="Hapus Sprint">
+                            <Trash2 size={14}/>
                           </button>
                         </div>
                       </td>
@@ -212,7 +283,7 @@ const Sprint = ({ projectId, currentRole }) => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={hasWriteAccess ? 5 : 4} className="text-center py-20 text-sm text-gray-400 font-medium">
+                  <td colSpan={hasWriteAccess ? 5 : 4} className="text-center py-24 text-xs font-bold text-gray-400 uppercase tracking-widest">
                     Tidak ada sprint pengerjaan ditemukan
                   </td>
                 </tr>
@@ -225,13 +296,13 @@ const Sprint = ({ projectId, currentRole }) => {
       {/* Modal Form */}
       {hasWriteAccess && (
         <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); resetForm(); }} title={isEditing ? "Edit Siklus Sprint" : "Tambah Sprint Baru"}>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 pt-2 max-h-[80vh] overflow-y-auto px-1">
             <div>
-              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Nama Sprint</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Nama Sprint</label>
               <input 
                 type="text" required
                 placeholder="Contoh: Sprint 1 - Core Features"
-                className="w-full mt-1.5 p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-100 text-sm transition-all"
+                className="w-full mt-1.5 p-3.5 border border-gray-100 rounded-2xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-50 text-xs font-bold transition-all"
                 value={formData.name}
                 onChange={(e) => setFormData({...formData, name: e.target.value})}
               />
@@ -239,19 +310,19 @@ const Sprint = ({ projectId, currentRole }) => {
             
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Mulai</label>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Mulai</label>
                 <input 
                   type="date" required
-                  className="w-full mt-1.5 p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-100 text-sm transition-all"
+                  className="w-full mt-1.5 p-3.5 border border-gray-100 rounded-2xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-50 text-xs font-bold transition-all"
                   value={formData.start_date}
                   onChange={(e) => setFormData({...formData, start_date: e.target.value})}
                 />
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Selesai</label>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Selesai</label>
                 <input 
                   type="date" required
-                  className="w-full mt-1.5 p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-100 text-sm transition-all"
+                  className="w-full mt-1.5 p-3.5 border border-gray-100 rounded-2xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-50 text-xs font-bold transition-all"
                   value={formData.end_date}
                   onChange={(e) => setFormData({...formData, end_date: e.target.value})}
                 />
@@ -259,29 +330,57 @@ const Sprint = ({ projectId, currentRole }) => {
             </div>
 
             <div>
-              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Status Tahapan</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Status Tahapan</label>
               <select
-                className="w-full mt-1.5 p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-100 text-sm font-bold text-blue-600 transition-all"
+                className={`w-full mt-1.5 p-3.5 border rounded-2xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-50 text-xs font-black uppercase tracking-widest transition-all ${getStatusStyles(formData.status)}`}
                 value={formData.status}
                 onChange={(e) => setFormData({...formData, status: e.target.value})}
               >
-                <option value="planned">Planned (Direncanakan)</option>
-                <option value="active">Active (Sedang Berjalan)</option>
-                <option value="completed">Completed (Selesai)</option>
+                <option value="planned" className="bg-white text-amber-600 font-bold">Planned (Direncanakan)</option>
+                <option value="active" className="bg-white text-emerald-600 font-bold">Active (Sedang Berjalan)</option>
+                <option value="completed" className="bg-white text-blue-600 font-bold">Completed (Selesai)</option>
               </select>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Deskripsi / Goals</label>
+              <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Deskripsi / Goals</label>
               <textarea 
                 placeholder="Jelaskan target utama pencapaian sprint ini..."
-                className="w-full mt-1.5 p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-100 text-sm min-h-[100px] transition-all"
+                className="w-full mt-1.5 p-3.5 border border-gray-100 rounded-2xl bg-gray-50 outline-none focus:ring-2 focus:ring-blue-50 text-xs font-medium min-h-[80px] transition-all"
                 value={formData.description}
                 onChange={(e) => setFormData({...formData, description: e.target.value})}
               />
             </div>
 
-            <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition shadow-lg shadow-blue-100 mt-2">
+            {formData.status === 'completed' && (
+              <div className="space-y-4 pt-2 border-t border-gray-100 animate-in slide-in-from-top-2 duration-300">
+                <div>
+                  <label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest flex items-center gap-1.5">
+                    <ClipboardCheck size={14}/> Hasil Sprint Review
+                  </label>
+                  <textarea 
+                    placeholder="Tuliskan umpan balik dari stakeholders atau hasil demo fitur..."
+                    className="w-full mt-1.5 p-3.5 border border-emerald-100 rounded-2xl bg-emerald-50/10 outline-none focus:ring-2 focus:ring-emerald-50 text-xs font-medium min-h-[80px] transition-all"
+                    value={formData.result_review}
+                    onChange={(e) => setFormData({...formData, result_review: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-purple-600 uppercase tracking-widest flex items-center gap-1.5">
+                    <History size={14}/> Hasil Sprint Retrospective
+                  </label>
+                  <textarea 
+                    placeholder="Apa yang berjalan baik? Apa yang perlu ditingkatkan oleh tim di sprint berikutnya?"
+                    className="w-full mt-1.5 p-3.5 border border-purple-100 rounded-2xl bg-purple-50/10 outline-none focus:ring-2 focus:ring-purple-50 text-xs font-medium min-h-[80px] transition-all"
+                    value={formData.result_retrospective}
+                    onChange={(e) => setFormData({...formData, result_retrospective: e.target.value})}
+                  />
+                </div>
+              </div>
+            )}
+
+            <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition shadow-lg shadow-blue-100 mt-4 sticky bottom-0">
               {isEditing ? 'Simpan Perubahan' : 'Simpan Sprint Baru'}
             </button>
           </form>

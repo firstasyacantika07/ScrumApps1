@@ -524,3 +524,27 @@ exports.getProjectLogs = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+
+/**
+ * ==========================================
+ * 7. PROJECT STATISTICS
+ * ==========================================
+ */
+exports.getProjectStats = async (req, res) => {
+  try {
+    const tenantId = req.headers['x-tenant-id'];
+    
+    // Ini adalah contoh query sederhana, sesuaikan dengan kebutuhan visualisasi dashboard Anda
+    const [totalProjects] = await db.query(`SELECT COUNT(*) as total FROM tbr_projects WHERE tenant_id = ?`, [tenantId]);
+    
+    res.json({
+      success: true,
+      stats: {
+        total_projects: totalProjects[0]?.total || 0
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

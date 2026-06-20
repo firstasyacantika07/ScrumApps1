@@ -225,7 +225,6 @@ const ProjectDetail = () => {
         setShowAddModal(false);
         setFormData({ title: '', description: '' });
         
-        // PERBAIKAN: Mengganti reload aplikasi global dengan pemanggilan ulang data secara SPA
         fetchProject();
         fetchGitHubStatus();
       }
@@ -303,14 +302,16 @@ const ProjectDetail = () => {
         {/* SIDEBAR */}
         <div className="col-span-12 lg:col-span-3 flex flex-col gap-2">
           <div className="bg-white p-4 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-1 sticky top-8">
+            {/* PINNED TO TOP: Members Link */}
+            <SideLink to="members" icon={<Users size={18}/>} label="Members" /> 
+            
+            {/* Navigasi Lainnya */}
             <SideLink to="" icon={<Briefcase size={18}/>} label="Overview" end={true} />
             <SideLink to="calendar" icon={<CalendarIcon size={18}/>} label="Calendar" />
             <SideLink to="vision-board" icon={<Target size={18}/>} label="Vision Board" />
             <SideLink to="backlog" icon={<Database size={18}/>} label="Backlog" />
             <SideLink to="sprint" icon={<RefreshCw size={18}/>} label="Sprint" />
             <SideLink to="development" icon={<Activity size={18}/>} label="Development" />
-            {/* PERBAIKAN: Menambahkan link navigasi ke halaman manajemen tim */}
-            <SideLink to="members" icon={<Users size={18}/>} label="Members" /> 
             <SideLink to="logs" icon={<Clock size={18}/>} label="Activity Log" /> 
           </div>
         </div>
@@ -324,7 +325,6 @@ const ProjectDetail = () => {
             <Route path="backlog" element={<Backlog projectId={id} currentRole={currentUser.role} />} />
             <Route path="sprint" element={<Sprint projectId={id} currentRole={currentUser.role} />} />
             <Route path="development" element={<Development projectId={id} currentRole={currentUser.role} />} />
-            {/* PERBAIKAN: Mendaftarkan sub-route untuk komponen Members agar bisa diakses */}
             <Route path="members" element={<Members projectId={id} currentRole={currentUser.role} />} />
             <Route path="logs" element={<ActivityLogsInline projectId={id} currentRole={currentUser.role} />} /> 
           </Routes>
