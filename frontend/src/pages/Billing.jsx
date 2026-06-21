@@ -13,6 +13,7 @@ import {
   FileText,
   GitBranch,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import api from '../api/axios';
 
@@ -22,7 +23,7 @@ const Billing = () => {
   const [loadingTrial, setLoadingTrial] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
 
-  // State Subscription terintegrasi dengan field Trial baru
+  // State Subscription terintegrasi dengan field database tbr_users + flag notifikasi baru
   const [subscription, setSubscription] = useState({
     plan: 'FREE',
     status: 'ACTIVE',
@@ -30,6 +31,7 @@ const Billing = () => {
     trialUsed: false,
     endDate: null,
     expiredTrial: false,
+    expiredSubscription: false, // Flag baru
     paymentMethod: 'Midtrans',
     totalSpent: 0,
   });
@@ -53,28 +55,37 @@ const Billing = () => {
       const userStatus = (user.subscription_status || 'ACTIVE').toUpperCase();
       const userCycle = (user.billing_cycle || 'NONE').toUpperCase();
 
+      // SINKRONISASI DATABASE: Menggunakan user.trial_end atau user.subscription_ends_at
+      const targetEndDate = user.trial_end || user.subscription_ends_at || null;
+
+      // Cek kedaluwarsa secara realtime (gabungan respons backend & kalkulasi mandiri)
+      const isTrialExpired = !!user.expired_trial || (targetEndDate && new Date(targetEndDate) < new Date() && userCycle === 'TRIAL');
+      const isSubExpired = !!user.expired_subscription || (targetEndDate && new Date(targetEndDate) < new Date() && userPlan !== 'FREE' && userCycle !== 'TRIAL');
+      
+      const isGlobalExpired = userStatus === 'EXPIRED' || isTrialExpired || isSubExpired;
+
       setSubscription({
         plan: userPlan,
-        status: userStatus,
+        status: isGlobalExpired ? 'EXPIRED' : userStatus,
         billingCycle: userCycle,
-        trialUsed: !!user.trial_used,
-        endDate: user.end_date || null,
-        expiredTrial: !!user.expired_trial,
+        trialUsed: user.trial_used === 1 || !!user.trial_used,
+        endDate: targetEndDate,
+        expiredTrial: isTrialExpired,
+        expiredSubscription: isSubExpired,
         paymentMethod: 'Midtrans',
-        totalSpent: 0,
+        totalSpent: user.total_spent ? Number(user.total_spent) : 0,
       });
 
     } catch (err) {
       console.error("Gagal memuat profil pengguna:", err);
     } finally {
-      setLoadingProfile(false);
+      loadingProfile && setLoadingProfile(false);
     }
   };
 
   // ==========================================
   // 2. FETCH & MAP PLANS FROM DATABASE
   // ==========================================
-  // Mengekstrak nilai string primitif agar tidak memicu re-fetch akibat referensi objek state yang berubah
   const currentSubPlan = subscription.plan;
   const currentSubCycle = subscription.billingCycle;
 
@@ -120,13 +131,12 @@ const Billing = () => {
             dynamicFeatures.push({ icon: GitBranch, text: 'Integrasi GitHub' });
           }
 
-          // Aturan tombol disable:
+          // Aturan tombol disable paket saat ini
           let isButtonDisabled = plan.name === currentSubPlan;
-          if (currentSubPlan === 'PRO' && currentSubCycle !== 'TRIAL' && plan.name === 'FREE') {
+          if (currentSubPlan === 'PRO' && subscription.status !== 'EXPIRED' && plan.name === 'FREE') {
             isButtonDisabled = true;
           }
 
-          // Teks default tombol berdasarkan jenis paket
           let buttonText = 'Pilih Paket';
           if (plan.name === 'FREE') buttonText = 'Paket Saat Ini';
           if (plan.name === 'ENTERPRISE') buttonText = 'Hubungi Sales';
@@ -154,19 +164,19 @@ const Billing = () => {
     if (!loadingProfile) {
       fetchPlans();
     }
-  }, [loadingProfile, currentSubPlan, currentSubCycle]);
+  }, [loadingProfile, currentSubPlan, currentSubCycle, subscription.status]);
 
   // ==========================================
   // 3. ACTION HANDLERS (TRIAL & BUY)
   // ==========================================
-  const handleStartTrial = async (plan) => {
+  const handleStartTrial = async () => {
     try {
       setLoadingTrial(true);
       const res = await api.post('/payment/start-trial');
-      
       alert(res.data?.message || "Trial PRO aktif selama 7 hari");
       loadProfile(); 
     } catch (err) {
+      console.error("Trial Activation Error:", err);
       alert(err.response?.data?.message || "Gagal mengaktifkan Trial.");
     } finally {
       setLoadingTrial(false);
@@ -244,13 +254,52 @@ const Billing = () => {
     );
   }
 
-  const remainingDays = subscription.endDate 
-    ? Math.ceil((new Date(subscription.endDate) - new Date()) / (1000 * 60 * 60 * 24))
-    : 0;
+  const targetDate = subscription.endDate ? new Date(subscription.endDate) : null;
+  const diffTime = (targetDate && !isNaN(targetDate.getTime())) ? targetDate - new Date() : 0;
+  const remainingDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+  const formatLocalDate = (dateString) => {
+    if (!dateString) return "-";
+    try {
+      const parsedDate = new Date(dateString);
+      if (isNaN(parsedDate.getTime())) return "-";
+      return parsedDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch {
+      return dateString;
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-5 lg:p-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-slate-50 pb-12">
+      
+      {/* 🚨 NOTIFICATION BANNER (Hanya Muncul Jika Expired) */}
+      {subscription.status === 'EXPIRED' && (
+        <div className="bg-red-600 text-white px-4 py-3 shadow-md border-b border-red-700 animate-fadeIn">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+            <div className="flex items-center gap-3">
+              <div className="bg-red-700 p-1.5 rounded-lg shrink-0">
+                <AlertTriangle size={20} className="text-white animate-pulse" />
+              </div>
+              <p className="text-sm font-bold tracking-wide">
+                {subscription.expiredTrial 
+                  ? "Masa uji coba (Trial 7 Hari) PRO Anda telah berakhir!" 
+                  : `Masa aktif paket ${subscription.plan} Anda telah kedaluwarsa pada ${formatLocalDate(subscription.endDate)}!`} 
+                {" "}Sistem membatasi akses fitur premium sampai Anda memperbarui paket.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })}
+              className="bg-white hover:bg-slate-100 text-red-700 font-black text-xs px-4 py-2 rounded-xl transition-all shadow-sm uppercase tracking-wider shrink-0"
+            >
+              Perbarui Sekarang
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CONTENT INNER CONTAINER */}
+      <div className="p-5 lg:p-8 max-w-7xl mx-auto mt-4">
         
         {/* HEADER */}
         <div className="mb-12">
@@ -276,36 +325,37 @@ const Billing = () => {
                 </div>
                 <div>
                   <h2 className="text-3xl font-black text-slate-900">
-                    {subscription.plan} {subscription.billingCycle === 'TRIAL' && '(PRO TRIAL)'}
+                    {subscription.plan} {subscription.billingCycle === 'TRIAL' && subscription.status !== 'EXPIRED' && '(PRO TRIAL)'}
                   </h2>
                   <p className="text-slate-500 mt-2">
-                    {subscription.billingCycle === 'TRIAL' 
+                    {subscription.status === 'TRIALING' 
                       ? `Masa uji coba aktif. Berakhir dalam ${remainingDays} hari lagi.` 
-                      : subscription.expiredTrial 
-                      ? "Masa uji coba trial Anda telah habis." 
+                      : subscription.status === 'EXPIRED' 
+                      ? "Akses Premium Terputus. Silakan lakukan pembayaran ulang untuk mengaktifkan kembali." 
                       : "Paket aktif saat ini."}
                   </p>
                   <div className="flex flex-wrap items-center gap-3 mt-5">
                     <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wide ${
-                      subscription.expiredTrial ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                      subscription.status === 'EXPIRED' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
                     }`}>
-                      {subscription.expiredTrial ? 'EXPIRED' : subscription.status}
+                      {subscription.status}
                     </span>
-                    {subscription.billingCycle === 'TRIAL' && (
+                    {subscription.status !== 'EXPIRED' && subscription.endDate && (
                       <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-3 py-1 rounded-md">
-                        Selesai pada: {subscription.endDate}
+                        Selesai pada: {formatLocalDate(subscription.endDate)}
                       </span>
                     )}
                   </div>
                 </div>
               </div>
 
-              {(subscription.plan === 'FREE' || subscription.billingCycle === 'TRIAL' || subscription.expiredTrial) && (
+              {(subscription.plan === 'FREE' || subscription.status === 'EXPIRED' || subscription.status === 'TRIALING') && (
                 <button
+                  type="button"
                   onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })}
                   className="h-14 px-7 rounded-2xl bg-red-500 hover:bg-red-600 text-white font-bold transition-all shadow-lg shrink-0"
                 >
-                  {subscription.expiredTrial ? 'Perpanjang Sekarang' : 'Upgrade Plan'}
+                  {subscription.status === 'EXPIRED' ? 'Perpanjang Sekarang' : 'Upgrade Plan'}
                 </button>
               )}
             </div>
@@ -390,7 +440,6 @@ const Billing = () => {
                     <div className="space-y-4 mb-8 border-t border-slate-100 pt-5">
                       {plan.features?.map((feature, idx) => {
                         const FeatureIcon = feature.icon || ShieldCheck; 
-                        // Perbaikan: Menambahkan kembalian nilai (return eksplisit) agar UI fitur tampil
                         return (
                           <div key={idx} className="flex items-start gap-3">
                             <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
@@ -408,23 +457,25 @@ const Billing = () => {
                     <div className="flex flex-col gap-2 w-full">
                       {!subscription.trialUsed && subscription.plan !== 'PRO' ? (
                         <button
+                          type="button"
                           disabled={loadingTrial}
-                          onClick={() => handleStartTrial(plan)}
+                          onClick={handleStartTrial}
                           className="w-full h-12 rounded-xl font-bold bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white transition-all text-sm flex items-center justify-center gap-2"
                         >
                           {loadingTrial ? <Loader2 size={16} className="animate-spin" /> : 'Mulai Trial 7 Hari'}
                         </button>
                       ) : (
                         <div className="w-full text-center py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-400 font-medium">
-                          {subscription.billingCycle === 'TRIAL' ? 'Sedang Menjalani Trial' : 'Kuota Trial Sudah Terpakai'}
+                          {subscription.status === 'TRIALING' ? 'Sedang Menjalani Trial' : 'Kuota Trial Sudah Terpakai'}
                         </div>
                       )}
 
                       <button
-                        disabled={subscription.plan === 'PRO' && subscription.billingCycle !== 'TRIAL'}
+                        type="button"
+                        disabled={subscription.plan === 'PRO' && subscription.status !== 'EXPIRED'}
                         onClick={() => handleBuyPlan(plan)}
                         className={`w-full h-12 rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 ${
-                          subscription.plan === 'PRO' && subscription.billingCycle !== 'TRIAL'
+                          subscription.plan === 'PRO' && subscription.status !== 'EXPIRED'
                             ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                             : 'bg-red-500 hover:bg-red-600 text-white shadow-md'
                         }`}
@@ -433,8 +484,8 @@ const Billing = () => {
                           <Loader2 size={16} className="animate-spin" />
                         ) : (
                           <>
-                            {subscription.plan === 'PRO' && subscription.billingCycle !== 'TRIAL' ? 'Paket Aktif' : 'Beli Sekarang'}
-                            {subscription.plan !== 'PRO' && <ArrowRight size={14} />}
+                            {subscription.plan === 'PRO' && subscription.status !== 'EXPIRED' ? 'Paket Premium Aktif' : 'Beli Sekarang'}
+                            {(subscription.plan !== 'PRO' || subscription.status === 'EXPIRED') && <ArrowRight size={14} />}
                           </>
                         )}
                       </button>
@@ -442,6 +493,7 @@ const Billing = () => {
                   ) : (
                     /* STANDAR BUTTON (Untuk Paket FREE & ENTERPRISE) */
                     <button
+                      type="button"
                       disabled={plan.disabled || loadingPlan === plan.id}
                       onClick={() => handleSelectPlan(plan)}
                       className={`w-full h-14 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm ${
@@ -450,7 +502,7 @@ const Billing = () => {
                           : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
                       }`}
                     >
-                      {plan.name === subscription.plan ? 'Paket Saat Ini' : plan.buttonText}
+                      {plan.name === subscription.plan && subscription.status !== 'EXPIRED' ? 'Paket Saat Ini' : plan.buttonText}
                       {!plan.disabled && <ArrowRight size={16} />}
                     </button>
                   )}

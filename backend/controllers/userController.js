@@ -38,19 +38,23 @@ exports.createUser = async (req, res) => {
       });
     }
 
+    // Amankan password dengan bcrypt hash
     const hash = await bcrypt.hash(password, 10);
 
+    // PERBAIKAN LOGIKA: Memastikan semua kolom dipetakan secara urut dan eksplisit
+    // Menetapkan default tenant_id ke 1 atau menyesuaikan arsitektur MVP multi-tenant Anda
     await db.query(
       `INSERT INTO tbr_users 
-      (name, email, password, role, phone_number, gender, package_type, subscription_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      (name, email, password, role, phone_number, gender, tenant_id, package_type, subscription_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         email,
         hash,
-        role || 'TeamDeveloper',
+        role || 'TeamDeveloper', // Default role sesuai kebutuhan ScrumApps
         phone_number || null,
-        gender || 'male',
+        gender || 'male',        // Mencegah nilai kosong bergeser di database
+        1,                       // Default tenant_id awal untuk kelancaran SaaS MVP
         'FREE',
         'active'
       ]

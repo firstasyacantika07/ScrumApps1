@@ -8,7 +8,8 @@ import {
   Briefcase,
   Code2,
   Mail,
-  Users
+  Users,
+  AlertCircle // 🌟 Ditambahkan icon untuk alert error
 } from 'lucide-react';
 
 import api from '../../api/axios';
@@ -20,6 +21,7 @@ const Members = ({ projectId }) => {
   const [users, setUsers] = useState([]);
 
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(''); // 🌟 State baru untuk menampilkan error limit/validasi di modal
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -40,28 +42,19 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const fetchMembers = async () => {
-
     try {
-
       setLoading(true);
-
       const res = await api.get(
         `/projects/${projectId}/members`
       );
-
       setMembers(res.data);
-
     } catch (err) {
-
       console.error(
         'GET MEMBERS ERROR:',
         err.response?.data || err.message
       );
-
     } finally {
-
       setLoading(false);
-
     }
   };
 
@@ -70,15 +63,10 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const fetchUsers = async () => {
-
     try {
-
       const res = await api.get('/users');
-
       setUsers(res.data);
-
     } catch (err) {
-
       console.error(
         'GET USERS ERROR:',
         err.response?.data || err.message
@@ -87,10 +75,8 @@ const Members = ({ projectId }) => {
   };
 
   useEffect(() => {
-
     fetchMembers();
     fetchUsers();
-
   }, [projectId]);
 
   /* =====================================================
@@ -98,13 +84,12 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const resetForm = () => {
-
     setFormData({
       user_id: '',
       role: 'TeamDeveloper'
     });
-
     setSelectedMember(null);
+    setErrorMsg(''); // 🌟 Reset error ketika form ditutup/dibersihkan
   };
 
   /* =====================================================
@@ -112,27 +97,28 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const handleAddMember = async (e) => {
-
     e.preventDefault();
+    setErrorMsg(''); // Bersihkan error sebelum submit baru
 
     try {
-
       await api.post(
         `/projects/${projectId}/members`,
         formData
       );
 
       setIsAddModalOpen(false);
-
       resetForm();
-
       fetchMembers();
-
     } catch (err) {
-
       console.error(
         'ADD MEMBER ERROR:',
         err.response?.data || err.message
+      );
+      // 🌟 Tangkap pesan error dari backend ("Limit member paket FREE maksimal 5 orang.")
+      setErrorMsg(
+        err.response?.data?.message || 
+        err.response?.data || 
+        "Gagal menambahkan anggota. Silakan coba lagi."
       );
     }
   };
@@ -142,27 +128,26 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const handleEditMember = async (e) => {
-
     e.preventDefault();
+    setErrorMsg('');
 
     try {
-
       await api.put(
         `/projects/${projectId}/members/${selectedMember.id}`,
         formData
       );
 
       setIsEditModalOpen(false);
-
       resetForm();
-
       fetchMembers();
-
     } catch (err) {
-
       console.error(
         'EDIT MEMBER ERROR:',
         err.response?.data || err.message
+      );
+      setErrorMsg(
+        err.response?.data?.message || 
+        "Gagal memperbarui role anggota."
       );
     }
   };
@@ -172,21 +157,15 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const handleDeleteMember = async () => {
-
     try {
-
       await api.delete(
         `/projects/${projectId}/members/${selectedMember.id}`
       );
 
       setIsDeleteModalOpen(false);
-
       resetForm();
-
       fetchMembers();
-
     } catch (err) {
-
       console.error(
         'DELETE MEMBER ERROR:',
         err.response?.data || err.message
@@ -199,14 +178,11 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const openEditModal = (member) => {
-
     setSelectedMember(member);
-
     setFormData({
       user_id: member.user_id,
       role: member.role
     });
-
     setIsEditModalOpen(true);
   };
 
@@ -215,9 +191,7 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const openDeleteModal = (member) => {
-
     setSelectedMember(member);
-
     setIsDeleteModalOpen(true);
   };
 
@@ -226,21 +200,15 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const roleBadge = (role) => {
-
     switch (role) {
-
       case 'ProjectOwner':
         return 'bg-purple-100 text-purple-700';
-
       case 'Superadmin':
         return 'bg-red-100 text-red-600';
-
       case 'BusinessAnalyst':
         return 'bg-blue-100 text-blue-600';
-
       case 'TeamDeveloper':
         return 'bg-green-100 text-green-600';
-
       default:
         return 'bg-gray-100 text-gray-600';
     }
@@ -251,21 +219,15 @@ const Members = ({ projectId }) => {
   ===================================================== */
 
   const roleIcon = (role) => {
-
     switch (role) {
-
       case 'ProjectOwner':
         return <Briefcase size={14} />;
-
       case 'Superadmin':
         return <Shield size={14} />;
-
       case 'BusinessAnalyst':
         return <UserCircle size={14} />;
-
       case 'TeamDeveloper':
         return <Code2 size={14} />;
-
       default:
         return <UserCircle size={14} />;
     }
@@ -283,29 +245,21 @@ const Members = ({ projectId }) => {
       ===================================================== */}
 
       <div className="flex items-center justify-between">
-
         <div className="flex items-center gap-3">
-
           <div className="p-3 rounded-2xl bg-red-100 text-red-500">
             <Users size={22} />
           </div>
-
           <div>
-
             <h2 className="text-2xl font-bold text-gray-800">
               Project Members
             </h2>
-
             <p className="text-sm text-gray-400">
               Kelola anggota project dan role mereka
             </p>
-
           </div>
-
         </div>
 
         {canManageMember && (
-
           <button
             onClick={() => {
               resetForm();
@@ -313,15 +267,10 @@ const Members = ({ projectId }) => {
             }}
             className="bg-red-500 hover:bg-red-600 text-white px-5 py-3 rounded-2xl flex items-center gap-2 font-semibold"
           >
-
             <Plus size={18} />
-
             Add Member
-
           </button>
-
         )}
-
       </div>
 
       {/* =====================================================
@@ -329,66 +278,44 @@ const Members = ({ projectId }) => {
       ===================================================== */}
 
       {loading ? (
-
         <div className="text-center py-20 text-gray-400">
           Loading members...
         </div>
-
       ) : (
-
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-
           {members.map((member) => (
-
             <div
               key={member.id}
               className="bg-white border border-gray-100 rounded-3xl p-6 shadow-sm"
             >
-
               <div className="flex items-start justify-between">
-
                 <div>
-
                   <div className="w-16 h-16 rounded-full bg-red-500 text-white flex items-center justify-center text-xl font-bold">
                     {member.name?.charAt(0)}
                   </div>
-
                   <h3 className="font-bold text-lg text-gray-800 mt-4">
                     {member.name}
                   </h3>
-
                   <div className="flex items-center gap-2 text-sm text-gray-400 mt-2">
-
                     <Mail size={14} />
-
                     {member.email}
-
                   </div>
-
                   <div
                     className={`inline-flex items-center gap-2 mt-4 px-3 py-1 rounded-full text-xs font-bold ${roleBadge(member.role)}`}
                   >
-
                     {roleIcon(member.role)}
-
                     {member.role}
-
                   </div>
-
                 </div>
 
                 {canManageMember && (
-
                   <div className="flex gap-2">
-
                     {/* EDIT BUTTON */}
                     <button
                       onClick={() => openEditModal(member)}
                       className="p-2 rounded-xl bg-blue-50 text-blue-500 hover:bg-blue-100"
                     >
-
                       <Edit size={16} />
-
                     </button>
 
                     {/* DELETE BUTTON */}
@@ -396,23 +323,14 @@ const Members = ({ projectId }) => {
                       onClick={() => openDeleteModal(member)}
                       className="p-2 rounded-xl bg-red-50 text-red-500 hover:bg-red-100"
                     >
-
                       <Trash2 size={16} />
-
                     </button>
-
                   </div>
-
                 )}
-
               </div>
-
             </div>
-
           ))}
-
         </div>
-
       )}
 
       {/* =====================================================
@@ -424,18 +342,22 @@ const Members = ({ projectId }) => {
         onClose={() => setIsAddModalOpen(false)}
         title="Add Member"
       >
-
         <form
           onSubmit={handleAddMember}
           className="space-y-5"
         >
+          {/* 🌟 ALERT ERROR (Tempat memunculkan pesan limit paket FREE) */}
+          {errorMsg && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold flex items-start gap-3 shadow-sm animate-fade-in">
+              <AlertCircle size={18} className="mt-0.5 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
 
           <div>
-
             <label className="text-sm font-semibold">
               Select User
             </label>
-
             <select
               value={formData.user_id}
               onChange={(e) =>
@@ -444,37 +366,27 @@ const Members = ({ projectId }) => {
                   user_id: e.target.value
                 })
               }
-              className="w-full mt-2 p-3 border rounded-2xl"
+              className="w-full mt-2 p-3 border rounded-2xl focus:ring-2 focus:ring-red-500 outline-none"
               required
             >
-
               <option value="">
                 Pilih User
               </option>
-
               {users.map((user) => (
-
                 <option
                   key={user.id}
                   value={user.id}
                 >
-
                   {user.name} - {user.email}
-
                 </option>
-
               ))}
-
             </select>
-
           </div>
 
           <div>
-
             <label className="text-sm font-semibold">
               Role
             </label>
-
             <select
               value={formData.role}
               onChange={(e) =>
@@ -483,40 +395,22 @@ const Members = ({ projectId }) => {
                   role: e.target.value
                 })
               }
-              className="w-full mt-2 p-3 border rounded-2xl"
+              className="w-full mt-2 p-3 border rounded-2xl focus:ring-2 focus:ring-red-500 outline-none"
             >
-
-              <option value="ProjectOwner">
-                Project Owner
-              </option>
-
-              <option value="Superadmin">
-                Superadmin
-              </option>
-
-              <option value="TeamDeveloper">
-                Team Developer
-              </option>
-
-              <option value="BusinessAnalyst">
-                Business Analyst
-              </option>
-
+              <option value="ProjectOwner">Project Owner</option>
+              <option value="Superadmin">Superadmin</option>
+              <option value="TeamDeveloper">Team Developer</option>
+              <option value="BusinessAnalyst">Business Analyst</option>
             </select>
-
           </div>
 
           <button
             type="submit"
-            className="w-full bg-red-500 hover:bg-red-600 text-white p-3 rounded-2xl font-bold"
+            className="w-full bg-red-500 hover:bg-red-600 text-white p-3 rounded-2xl font-bold transition-colors"
           >
-
             Save Member
-
           </button>
-
         </form>
-
       </Modal>
 
       {/* =====================================================
@@ -528,18 +422,21 @@ const Members = ({ projectId }) => {
         onClose={() => setIsEditModalOpen(false)}
         title="Edit Member"
       >
-
         <form
           onSubmit={handleEditMember}
           className="space-y-5"
         >
+          {errorMsg && (
+            <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold flex items-start gap-3 global-alert">
+              <AlertCircle size={18} className="mt-0.5 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
 
           <div>
-
             <label className="text-sm font-semibold">
               Role
             </label>
-
             <select
               value={formData.role}
               onChange={(e) =>
@@ -550,38 +447,20 @@ const Members = ({ projectId }) => {
               }
               className="w-full mt-2 p-3 border rounded-2xl"
             >
-
-              <option value="ProjectOwner">
-                Project Owner
-              </option>
-
-              <option value="Superadmin">
-                Superadmin
-              </option>
-
-              <option value="TeamDeveloper">
-                Team Developer
-              </option>
-
-              <option value="BusinessAnalyst">
-                Business Analyst
-              </option>
-
+              <option value="ProjectOwner">Project Owner</option>
+              <option value="Superadmin">Superadmin</option>
+              <option value="TeamDeveloper">Team Developer</option>
+              <option value="BusinessAnalyst">Business Analyst</option>
             </select>
-
           </div>
 
           <button
             type="submit"
             className="w-full bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-2xl font-bold"
           >
-
             Update Member
-
           </button>
-
         </form>
-
       </Modal>
 
       {/* =====================================================
@@ -593,36 +472,25 @@ const Members = ({ projectId }) => {
         onClose={() => setIsDeleteModalOpen(false)}
         title="Delete Member"
       >
-
         <div className="space-y-5">
-
           <p className="text-gray-600">
             Yakin ingin menghapus member:
           </p>
-
           <div className="bg-gray-100 p-4 rounded-2xl">
-
             <h3 className="font-bold">
               {selectedMember?.name}
             </h3>
-
             <p className="text-sm text-gray-500">
               {selectedMember?.email}
             </p>
-
           </div>
-
           <button
             onClick={handleDeleteMember}
             className="w-full bg-red-500 hover:bg-red-600 text-white p-3 rounded-2xl font-bold"
           >
-
             Hapus Member
-
           </button>
-
         </div>
-
       </Modal>
 
     </div>

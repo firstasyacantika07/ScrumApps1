@@ -2,14 +2,39 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const db = require("../config/db");
 
+// =========================================================================
+// 💡 HELPER INTERNAL: VALIDASI & SINKRONISASI FORMAT TANGGAL ISO
+// =========================================================================
+// Mencegah crash jika data berupa objek Date asli JavaScript atau string kosong 0000-00-00
+const safeIsoDate = (dateString) => {
+  if (!dateString) return null;
+
+  // Jika driver mysql2 otomatis mengonversi kolom DATETIME menjadi objek Date JavaScript
+  if (dateString instanceof Date) {
+    if (isNaN(dateString.getTime())) return null;
+    return dateString.toISOString().split('T')[0];
+  }
+
+  // Jika data berupa tipe string, lakukan sanitasi format kosong MySQL
+  if (typeof dateString === 'string') {
+    const trimmed = dateString.trim();
+    if (!trimmed || trimmed.startsWith('0000')) return null;
+    
+    const parsedDate = new Date(trimmed);
+    return isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString().split('T')[0];
+  }
+
+  return null;
+};
+
 // ======================================================
-// USER LOGIN
+// 🔐 USER LOGIN
 // ======================================================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. Ambil data user komplit berdasarkan email (Menambahkan kolom trial & subscription)
+    // 1. Ambil data user komplit berdasarkan email
     const [rows] = await db.query(
       `
       SELECT
@@ -23,7 +48,8 @@ exports.login = async (req, res) => {
         billing_cycle,
         subscription_status,
         trial_used,
-        trial_ends_at,
+        trial_start,
+        trial_end,
         subscription_ends_at
       FROM tbr_users
       WHERE email = ?
@@ -44,7 +70,7 @@ exports.login = async (req, res) => {
 
     // 2. Sinkronisasi format hash bcrypt PHP ($2y$ ke $2a$) jika migrasi dari PHP
     let hashedPassword = user.password;
-    if (hashedPassword.startsWith("$2y$")) {
+    if (hashedPassword && hashedPassword.startsWith("$2y$")) {
       hashedPassword = "$2a$" + hashedPassword.slice(4);
     }
 
@@ -57,26 +83,38 @@ exports.login = async (req, res) => {
       });
     }
 
-    // 💡 CATATAN LOGIKA: Status subscription tidak diblokir di sini agar user FREE / PENDING 
-    // tetap bisa masuk ke dashboard dan mengakses halaman Billing untuk upgrade paket.
-
-    // 4. Cek apakah trial sudah kedaluwarsa secara realtime (Cron-job alternatif saat login)
+    // 4. SINKRONISASI NOTIFIKASI: Cek Kedaluwarsa Realtime (Trial & Subscription Reguler)
     let finalStatus = user.subscription_status || "active";
     let expiredTrial = false;
-    
-    if (user.billing_cycle === "TRIAL" && user.trial_ends_at) {
-      const now = new Date();
-      const endTrialDate = new Date(user.trial_ends_at);
+    let expiredSubscription = false;
+    let triggerDatabaseUpdate = false;
+    const now = new Date();
+
+    // A. Pengecekan jika akun sedang dalam masa TRIAL
+    if (user.billing_cycle === "TRIAL" && user.trial_end) {
+      const endTrialDate = new Date(user.trial_end);
       if (now > endTrialDate) {
         finalStatus = "expired";
         expiredTrial = true;
-        
-        // Update otomatis ke database jika ketahuan expired pas login
-        await db.query(
-          `UPDATE tbr_users SET subscription_status = 'expired' WHERE id = ?`,
-          [user.id]
-        );
+        triggerDatabaseUpdate = true;
       }
+    } 
+    // B. Pengecekan jika akun menggunakan paket komersial reguler (BULANAN/TAHUNAN)
+    else if (user.package_type !== "FREE" && user.subscription_ends_at) {
+      const endSubDate = new Date(user.subscription_ends_at);
+      if (now > endSubDate) {
+        finalStatus = "expired";
+        expiredSubscription = true;
+        triggerDatabaseUpdate = true;
+      }
+    }
+
+    // Eksekusi update otomatis status ke database jika terdeteksi expired di server
+    if (triggerDatabaseUpdate && user.subscription_status !== "expired") {
+      await db.query(
+        `UPDATE tbr_users SET subscription_status = 'expired' WHERE id = ?`,
+        [user.id]
+      );
     }
 
     // 5. Generate JWT Token dengan payload data paket terbaru
@@ -98,8 +136,8 @@ exports.login = async (req, res) => {
     // Amankan payload response dengan menghapus properti password sebelum dikirim
     delete user.password;
 
-    // Masukkan info tambahan tanggal untuk dibaca Billing.jsx frontend
-    const formattedEndDate = user.billing_cycle === "TRIAL" ? user.trial_ends_at : user.subscription_ends_at;
+    // Tentukan info tambahan tanggal batas akhir untuk dibaca komponen frontend
+    const formattedEndDate = user.billing_cycle === "TRIAL" ? user.trial_end : user.subscription_ends_at;
 
     return res.status(200).json({
       success: true,
@@ -108,7 +146,8 @@ exports.login = async (req, res) => {
         ...user,
         subscription_status: finalStatus,
         expired_trial: expiredTrial,
-        end_date: formattedEndDate ? new Date(formattedEndDate).toISOString().split('T')[0] : null
+        expired_subscription: expiredSubscription, // Flag baru untuk dibaca notifikasi frontend
+        end_date: safeIsoDate(formattedEndDate)
       },
     });
 
@@ -122,7 +161,7 @@ exports.login = async (req, res) => {
 };
 
 // ======================================================
-// GET ME (Check Current Logged In User Data)
+// 🔍 GET ME (Check Current Logged In User Data)
 // ======================================================
 exports.getMe = async (req, res) => {
   try {
@@ -133,7 +172,7 @@ exports.getMe = async (req, res) => {
       });
     }
 
-    // Ambil data lengkap untuk disinkronkan ke Billing Frontend secara berkala
+    // Ambil data lengkap untuk disinkronkan ke Billing & Dashboard Frontend
     const [rows] = await db.query(
       `
       SELECT
@@ -146,7 +185,8 @@ exports.getMe = async (req, res) => {
         billing_cycle,
         subscription_status,
         trial_used,
-        trial_ends_at,
+        trial_start,
+        trial_end,
         subscription_ends_at
       FROM tbr_users
       WHERE id = ?
@@ -164,25 +204,40 @@ exports.getMe = async (req, res) => {
 
     const user = rows[0];
 
-    // Cek status kedaluwarsa trial secara realtime saat user merefresh halaman browser
+    // SINKRONISASI NOTIFIKASI: Cek Kedaluwarsa Realtime saat Refresh Browser
     let finalStatus = user.subscription_status || "active";
     let expiredTrial = false;
-    
-    if (user.billing_cycle === "TRIAL" && user.trial_ends_at) {
-      const now = new Date();
-      const endTrialDate = new Date(user.trial_ends_at);
+    let expiredSubscription = false;
+    let triggerDatabaseUpdate = false;
+    const now = new Date();
+
+    // A. Jalur cek TRIAL
+    if (user.billing_cycle === "TRIAL" && user.trial_end) {
+      const endTrialDate = new Date(user.trial_end);
       if (now > endTrialDate) {
         finalStatus = "expired";
         expiredTrial = true;
-
-        await db.query(
-          `UPDATE tbr_users SET subscription_status = 'expired' WHERE id = ?`,
-          [user.id]
-        );
+        triggerDatabaseUpdate = true;
+      }
+    } 
+    // B. Jalur cek Subscription reguler
+    else if (user.package_type !== "FREE" && user.subscription_ends_at) {
+      const endSubDate = new Date(user.subscription_ends_at);
+      if (now > endSubDate) {
+        finalStatus = "expired";
+        expiredSubscription = true;
+        triggerDatabaseUpdate = true;
       }
     }
 
-    const formattedEndDate = user.billing_cycle === "TRIAL" ? user.trial_ends_at : user.subscription_ends_at;
+    if (triggerDatabaseUpdate && user.subscription_status !== "expired") {
+      await db.query(
+        `UPDATE tbr_users SET subscription_status = 'expired' WHERE id = ?`,
+        [user.id]
+      );
+    }
+
+    const formattedEndDate = user.billing_cycle === "TRIAL" ? user.trial_end : user.subscription_ends_at;
 
     return res.status(200).json({
       success: true,
@@ -196,8 +251,11 @@ exports.getMe = async (req, res) => {
         billing_cycle: user.billing_cycle || "NONE",
         subscription_status: finalStatus,
         trial_used: user.trial_used,
+        trial_start: user.trial_start,
+        trial_end: user.trial_end,
         expired_trial: expiredTrial,
-        end_date: formattedEndDate ? new Date(formattedEndDate).toISOString().split('T')[0] : null
+        expired_subscription: expiredSubscription, // Flag untuk memicu banner peringatan di frontend
+        end_date: safeIsoDate(formattedEndDate)
       },
     });
 

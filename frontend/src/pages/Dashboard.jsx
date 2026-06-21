@@ -147,6 +147,11 @@ const SuperAdminView = ({ stats, recentProjects, navigate }) => {
     { name: 'Late', value: finalStats.late, color: '#ef4444' },
   ].filter((item) => item.value > 0);
 
+  // Ambil data user dari localStorage untuk mengecek status billing secara realtime
+  const loggedInUser = localStorage.getItem('user');
+  const user = loggedInUser ? JSON.parse(loggedInUser) : null;
+  const isExpired = user?.subscription_status?.toUpperCase() === 'EXPIRED';
+
   return (
     <div className="flex flex-col gap-8">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -199,14 +204,36 @@ const SuperAdminView = ({ stats, recentProjects, navigate }) => {
             </div>
           </div>
 
-          <div className="bg-[#ee1e2d] p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group">
+          {/* ⚡ CARD LAYANAN SAAS DENGAN KONDISI NOTIFIKASI EXPIRED */}
+          <div className={`p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group transition-all duration-300 ${
+            isExpired 
+              ? 'bg-gradient-to-br from-amber-500 to-red-600 ring-4 ring-red-500/20' 
+              : 'bg-[#ee1e2d]'
+          }`}>
             <div className="absolute -right-8 -bottom-8 w-32 h-32 bg-white/10 rounded-full group-hover:scale-110 transition-transform"></div>
-            <p className="text-[9px] font-black uppercase tracking-[2px] opacity-70 mb-2">Layanan Kami</p>
-            <h3 className="text-xl font-black leading-tight mb-6">Paket SaaS &<br />Pricing Plan</h3>
-            <button onClick={() => navigate('/billing')} className="flex items-center gap-2 px-5 py-3 bg-white text-[#ee1e2d] rounded-xl text-[9px] font-black uppercase tracking-widest hover:shadow-lg transition-all">
-              Lihat Harga <ChevronRight size={14} />
-            </button>
+            
+            {isExpired ? (
+              <>
+                <div className="flex items-center gap-1.5 mb-2 bg-black/20 w-fit px-2.5 py-1 rounded-full border border-white/10">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-ping" />
+                  <p className="text-[8px] font-black uppercase tracking-[2px]">Masa Aktif Habis</p>
+                </div>
+                <h3 className="text-xl font-black leading-tight mb-6">Akses Workspace<br />Sedang Dibekukan</h3>
+                <button onClick={() => navigate('/billing')} className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-white text-red-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-md">
+                  Perbarui Sekarang <ChevronRight size={14} />
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-[9px] font-black uppercase tracking-[2px] opacity-70 mb-2">Layanan Kami</p>
+                <h3 className="text-xl font-black leading-tight mb-6">Paket SaaS &<br />Pricing Plan</h3>
+                <button onClick={() => navigate('/billing')} className="flex items-center gap-2 px-5 py-3 bg-white text-[#ee1e2d] rounded-xl text-[9px] font-black uppercase tracking-widest hover:shadow-lg transition-all">
+                  Lihat Harga <ChevronRight size={14} />
+                </button>
+              </>
+            )}
           </div>
+
         </div>
       </div>
     </div>
