@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react'; // 🛠️ Tambahkan useRef
 import { Routes, Route, NavLink, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Briefcase, Plus, RefreshCw, Target, ChevronLeft, 
@@ -11,7 +11,7 @@ import api from '../api/axios';
 import VisionBoard from '../components/project/VisionBoard';
 import Backlog from '../components/project/Backlog';
 import Sprint from '../components/project/Sprint';
-import Development from '../components/project/Development';
+import Development from '../components/project/Kanban';
 import Members from '../components/project/Members';
 import ProjectCalendar from '../components/project/ProjectCalendar';
 import GitHubStatusCard from '../components/github/GitHubStatusCard';
@@ -131,6 +131,9 @@ const ProjectDetail = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // 🛠️ Membuat reference khusus untuk memicu modal internal Vision Board
+  const visionBoardRef = useRef(null);
+
   const [project, setProject] = useState(null);
   const [integrationData, setIntegrationData] = useState(null); 
   const [loading, setLoading] = useState(true);
@@ -193,7 +196,6 @@ const ProjectDetail = () => {
     }
   }, [id, fetchProject, fetchGitHubStatus]);
 
-  // SINKRONISASI OTORISASI
   const isSuperAdmin = currentUser.role === 'SUPERADMIN';
   const isBA = currentUser.role === 'BUSINESSANALYST';
   const isProjectOwner = currentUser.role === 'PROJECTOWNER';
@@ -204,6 +206,18 @@ const ProjectDetail = () => {
     if (isBA && (location.pathname.includes('vision-board') || location.pathname.includes('backlog'))) return true;
     
     return false;
+  };
+
+  // 🛠️ Fungsi interceptor ketika tombol TAMBAH di pojok kanan atas diklik
+  const handleAddButtonClick = () => {
+    if (location.pathname.includes('vision-board')) {
+      // Alihkan aksi langsung ke fungsi modal internal milik VisionBoard.jsx
+      visionBoardRef.current?.openNewBoardModal();
+    } else {
+      // Untuk modul backlog (atau modul lain yang form-nya simpel), pakai modal bawaan
+      setFormData({ title: '', description: '' }); 
+      setShowAddModal(true);
+    }
   };
 
   const handleSave = async () => {
@@ -217,7 +231,6 @@ const ProjectDetail = () => {
       let endpoint = '';
       
       if (location.pathname.includes('backlog')) endpoint = `/projects/${id}/backlogs`;
-      else if (location.pathname.includes('vision-board')) endpoint = `/projects/${id}/vision-boards`;
 
       if (endpoint) {
         const payload = { ...formData, name: formData.title };
@@ -277,7 +290,8 @@ const ProjectDetail = () => {
         <div className="flex items-center gap-2">
           {['backlog', 'vision-board'].some(p => location.pathname.includes(p)) ? (
             hasWriteAccess() ? (
-              <button onClick={() => { setFormData({ title: '', description: '' }); setShowAddModal(true); }}
+              /* 🛠️ Diperbarui ke fungsi handleAddButtonClick */
+              <button onClick={handleAddButtonClick}
                 className="bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-black flex items-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95">
                 <Plus size={18} strokeWidth={3} /> TAMBAH {getModalType().toUpperCase()}
               </button>
@@ -302,10 +316,7 @@ const ProjectDetail = () => {
         {/* SIDEBAR */}
         <div className="col-span-12 lg:col-span-3 flex flex-col gap-2">
           <div className="bg-white p-4 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-1 sticky top-8">
-            {/* PINNED TO TOP: Members Link */}
             <SideLink to="members" icon={<Users size={18}/>} label="Members" /> 
-            
-            {/* Navigasi Lainnya */}
             <SideLink to="" icon={<Briefcase size={18}/>} label="Overview" end={true} />
             <SideLink to="calendar" icon={<CalendarIcon size={18}/>} label="Calendar" />
             <SideLink to="vision-board" icon={<Target size={18}/>} label="Vision Board" />
@@ -321,7 +332,8 @@ const ProjectDetail = () => {
           <Routes>
             <Route path="/" element={<DefaultView project={project} integrationData={integrationData} refreshData={fetchGitHubStatus} />} />
             <Route path="calendar" element={<ProjectCalendar projectId={id} currentRole={currentUser.role} />} />
-            <Route path="vision-board" element={<VisionBoard projectId={id} currentRole={currentUser.role} />} />
+            {/* 🛠️ Pasangkan ref={visionBoardRef} ke komponen VisionBoard di bawah ini */}
+            <Route path="vision-board" element={<VisionBoard ref={visionBoardRef} projectId={id} currentRole={currentUser.role} />} />
             <Route path="backlog" element={<Backlog projectId={id} currentRole={currentUser.role} />} />
             <Route path="sprint" element={<Sprint projectId={id} currentRole={currentUser.role} />} />
             <Route path="development" element={<Development projectId={id} currentRole={currentUser.role} />} />
@@ -331,8 +343,8 @@ const ProjectDetail = () => {
         </div>
       </div>
 
-      {/* MODAL DYNAMIC (Hanya untuk Vision Board & Backlog) */}
-      {showAddModal && hasWriteAccess() && ['backlog', 'vision-board'].some(p => location.pathname.includes(p)) && (
+      {/* MODAL DYNAMIC (Sekarang Hanya Menangani Backlog / Form Simpel) */}
+      {showAddModal && hasWriteAccess() && location.pathname.includes('backlog') && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-50 flex justify-between items-center">
@@ -347,7 +359,7 @@ const ProjectDetail = () => {
               <div className="flex gap-3 pt-4">
                 <button onClick={() => setShowAddModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase hover:bg-slate-200 transition-all">Batal</button>
                 <button onClick={handleSave} disabled={isSubmitting} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
-                  {isSubmitting ? 'Menyimpan...' : `Simpan ${getModalType()}`}
+                  {isSubmitting ? 'Menyimpan...' : `Simpan {getModalType()}`}
                 </button>
               </div>
             </div>

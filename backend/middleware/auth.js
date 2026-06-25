@@ -5,7 +5,6 @@ const db = require('../config/db');
  * =========================================================================
  * 🔐 MIDDLEWARE VERIFY TOKEN (SINKRONISASI MULTI-TENANT SAAS)
  * =========================================================================
- * Memverifikasi JWT, memastikan masa aktif, dan menarik data user + status paket perusahaan
  */
 const verifyToken = async (req, res, next) => {
   try {
@@ -30,7 +29,7 @@ const verifyToken = async (req, res, next) => {
     // 3. Verifikasi tanda tangan token JWT
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 4. Ambil data user komplit & status tenant
+    // 4. Tarik data paket, masa trial, dan status komersial langsung dari tbr_tenants
     const sql = `
       SELECT 
         u.id,
@@ -38,15 +37,12 @@ const verifyToken = async (req, res, next) => {
         u.email,
         u.role,
         u.tenant_id,
-        u.package_type,
-        u.subscription_status,
-        u.subscription_ends_at,
-        u.trial_start,
-        u.trial_end,
-        u.is_trial,
-        u.trial_used,
-        u.billing_cycle,
-        t.status as tenant_status
+        t.status as tenant_status,
+        t.package_type,
+        t.billing_cycle,
+        t.trial_start,
+        t.trial_end,
+        t.subscription_ends_at
       FROM tbr_users u
       LEFT JOIN tbr_tenants t ON u.tenant_id = t.id
       WHERE u.id = ?
@@ -71,11 +67,11 @@ const verifyToken = async (req, res, next) => {
     // =========================================================================
     // 🔄 SINKRONISASI CO-CHECK: Pengecekan Kedaluwarsa Realtime di Setiap Request API
     // =========================================================================
-    let finalStatus = user.subscription_status || "active";
+    let finalStatus = user.tenant_status || "active";
     let triggerDatabaseUpdate = false;
     const now = new Date();
 
-    // A. Jalur cek kedaluwarsa TRIAL
+    // A. Jalur cek kedaluwarsa TRIAL di level tenant
     if (user.billing_cycle === "TRIAL" && user.trial_end) {
       const endTrialDate = new Date(user.trial_end);
       if (now > endTrialDate) {
@@ -83,7 +79,7 @@ const verifyToken = async (req, res, next) => {
         triggerDatabaseUpdate = true;
       }
     } 
-    // B. Jalur cek kedaluwarsa Paket Komersial Reguler (PRO BULANAN/TAHUNAN)
+    // B. Jalur cek kedaluwarsa Paket Komersial Reguler (PRO BULANAN/TAHUNAN) di level tenant
     else if (user.package_type !== "FREE" && user.subscription_ends_at) {
       const endSubDate = new Date(user.subscription_ends_at);
       if (now > endSubDate) {
@@ -92,36 +88,36 @@ const verifyToken = async (req, res, next) => {
       }
     }
 
-    // Eksekusi update otomatis ke database jika status di DB belum 'expired'
-    if (triggerDatabaseUpdate && user.subscription_status !== "expired") {
+    if (triggerDatabaseUpdate && user.tenant_status !== "expired") {
       await db.query(
-        `UPDATE tbr_users SET subscription_status = 'expired' WHERE id = ?`,
-        [user.id]
+        `UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`,
+        [user.tenant_id]
       );
     }
 
-    // 6. Menyimpan data user & status billing ke objek request (req.user) dengan status terbaru
+    // ✨ REVISI SINKRONISASI: Standardisasi string role (lowercase, tanpa spasi)
+    // Ini krusial agar konsisten di frontend dan backend controller lainnya.
+    const cleanRole = user.role ? String(user.role).replace(/\s+/g, '').toLowerCase().trim() : '';
+
+    // 6. Menyimpan data user & status billing ke objek request (req.user)
     req.user = {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
+      role: cleanRole, // 🔥 Menggunakan role yang sudah bersih & terstandar
       tenant_id: user.tenant_id,
       package_type: user.package_type || 'FREE',
-      subscription_status: finalStatus, // Menggunakan status hasil sinkronisasi realtime
+      subscription_status: finalStatus,
       subscription_ends_at: user.subscription_ends_at,
       trial_start: user.trial_start,
       trial_end: user.trial_end,
-      is_trial: user.is_trial,
-      trial_used: user.trial_used,
-      billing_cycle: user.billing_cycle
+      billing_cycle: user.billing_cycle || 'NONE'
     };
 
     next();
   } catch (err) {
     console.error("🔥 VERIFY TOKEN ERROR:", err.message);
 
-    // Jika token kedaluwarsa, beri tahu frontend secara spesifik agar bisa auto-logout via Axios Interceptor
     if (err.name === "TokenExpiredError") {
       return res.status(401).json({
         message: "Token kedaluwarsa, silakan login kembali",
@@ -138,35 +134,29 @@ const verifyToken = async (req, res, next) => {
  * =========================================================================
  * 🛡️ MIDDLEWARE OTORISASI HAK AKSES BERDASAR ROLE (RBAC)
  * =========================================================================
- * Membatasi akses rute API berdasarkan whitelist role atau forbidden role
  */
 const authorize = (roles = [], options = {}) => {
   if (typeof roles === "string") roles = [roles];
   
-  // Mengambil opsi daftar role yang diblokir khusus (jika ada)
   const forbiddenRoles = options.forbiddenRoles || [];
-  
-  // Normalisasi string untuk mengantisipasi ketidaksamaan format spasi / karakter
   const strictForbidden = forbiddenRoles.map(r => r.replace(/\s+/g, '').toLowerCase().trim());
 
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ message: "Unauthorized" });
 
-    // Normalisasi input role dari database user
-    const userRole = req.user.role?.replace(/\s+/g, '').toLowerCase().trim();
+    // Karena req.user.role di atas sudah di-clean, kita langsung pakai
+    const userRole = req.user.role; 
     const allowedRoles = roles.map(r => r.replace(/\s+/g, '').toLowerCase().trim());
 
-    // 1. Cek Proteksi Mutlak (Forbidden Roles) terlebih dahulu
     if (strictForbidden.includes(userRole)) {
       return res.status(403).json({ 
         message: "Forbidden: Role Anda sengaja dibatasi untuk aksi ini." 
       });
     }
 
-    // 2. Bypass otomatis untuk Superadmin Tenant, KECUALI jika ia masuk ke daftar strictForbidden
+    // Superadmin mem-bypass semua aksi umum tingkat tenant/workspace
     if (userRole === "superadmin") return next();
 
-    // 3. Validasi apakah role user terdaftar di whitelist (allowedRoles)
     if (roles.length && !allowedRoles.includes(userRole)) {
       return res.status(403).json({ message: "Forbidden: Anda tidak memiliki hak akses untuk menu ini." });
     }

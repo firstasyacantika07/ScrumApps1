@@ -1,58 +1,44 @@
 const db = require('../config/db');
 
 /**
- * ADD TEAM MEMBER
+ * 👥 1. ADD TEAM MEMBER (Sudah Terproteksi checkTeamLimit di Router)
  */
 exports.addTeamMember = async (req, res) => {
   try {
-    const { projectId } = req.params; // Mengambil dari URL parameter
+    const { projectId } = req.params;
     const { user_id, role } = req.body;
+    const tenantId = req.user.tenant_id; // Diambil dari JWT verifyToken
 
-    // 1. Dapatkan info paket pemilik proyek (SaaS Limit Check)
-    const [owner] = await db.query(
-      `SELECT u.package_type FROM tbr_users u 
-       JOIN tbr_projects p ON u.id = p.user_id 
-       WHERE p.id = ?`, [projectId]
+    // Validasi Keamanan: Pastikan proyek yang dituju benar-block milik tenant Admin yang login
+    const [projectCheck] = await db.query(
+      'SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?',
+      [projectId, tenantId]
     );
-
-    if (owner.length === 0) {
-      return res.status(404).json({ message: "Proyek tidak ditemukan." });
+    if (projectCheck.length === 0) {
+      return res.status(403).json({ message: "Akses Ditolak: Proyek tidak berada di bawah workspace Anda." });
     }
 
-    // 2. Hitung jumlah member saat ini di proyek tersebut
-    const [currentMembers] = await db.query(
-      `SELECT COUNT(*) as total FROM tbr_teams WHERE project_id = ?`, [projectId]
-    );
+    // Standardisasi string role agar konsisten (lowercase, tanpa spasi)
+    const cleanRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
 
-    const packageType = owner[0].package_type || 'FREE';
-    const totalMembers = currentMembers[0].total;
-
-    // 3. Validasi Limit Tim berdasarkan Paket
-    if (packageType === 'FREE' && totalMembers >= 5) {
-      return res.status(403).json({ message: "Limit member paket FREE maksimal 5 orang." });
-    }
-    if (packageType === 'PRO' && totalMembers >= 20) {
-      return res.status(403).json({ message: "Limit member paket PRO maksimal 20 orang." });
-    }
-
-    // 4. Cek apakah user sudah terdaftar di proyek ini
+    // Cek apakah user yang mau diundang sudah terdaftar di proyek ini
     const [existing] = await db.query(
-      `SELECT id FROM tbr_teams WHERE project_id = ? AND user_id = ?`,
+      `SELECT id FROM tbr_project_members WHERE project_id = ? AND user_id = ?`,
       [projectId, user_id]
     );
 
     if (existing.length > 0) {
-      return res.status(400).json({ message: "User ini sudah menjadi anggota tim." });
+      return res.status(400).json({ message: "User ini sudah menjadi anggota tim aktif di proyek ini." });
     }
 
-    // 5. Insert member baru dengan timestamp
+    // Insert ke tabel baru: tbr_project_members
     await db.query(
-      `INSERT INTO tbr_teams (project_id, user_id, role, created_at, updated_at) 
+      `INSERT INTO tbr_project_members (project_id, user_id, role, created_at, updated_at) 
        VALUES (?, ?, ?, NOW(), NOW())`,
-      [projectId, user_id, role]
+      [projectId, user_id, cleanRole]
     );
 
-    res.status(201).json({ message: "Member berhasil ditambahkan ke tim." });
+    res.status(201).json({ success: true, message: "Anggota tim berhasil ditambahkan secara manual." });
 
   } catch (err) {
     console.error("❌ ADD MEMBER ERROR:", err);
@@ -61,17 +47,28 @@ exports.addTeamMember = async (req, res) => {
 };
 
 /**
- * GET TEAM BY PROJECT
+ * 🔍 2. GET TEAM BY PROJECT (Aman Multi-Tenant)
  */
 exports.getTeamByProject = async (req, res) => {
   try {
     const { projectId } = req.params;
+    const tenantId = req.user.tenant_id;
+
+    // Pastikan proyek milik tenant bersangkutan sebelum menarik data tim
+    const [projectCheck] = await db.query(
+      'SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?',
+      [projectId, tenantId]
+    );
+    if (projectCheck.length === 0) {
+      return res.status(403).json({ message: "Akses Ditolak." });
+    }
     
     const [rows] = await db.query(
-      `SELECT t.*, u.name, u.email FROM tbr_teams t 
-       JOIN tbr_users u ON t.user_id = u.id 
-       WHERE t.project_id = ?
-       ORDER BY t.created_at ASC`, 
+      `SELECT pm.id, pm.project_id, pm.user_id, pm.role, pm.created_at, u.name, u.email 
+       FROM tbr_project_members pm
+       JOIN tbr_users u ON pm.user_id = u.id 
+       WHERE pm.project_id = ?
+       ORDER BY pm.created_at ASC`, 
       [projectId]
     );
     
@@ -83,23 +80,34 @@ exports.getTeamByProject = async (req, res) => {
 };
 
 /**
- * UPDATE TEAM MEMBER (Update Role)
+ * 🔄 3. UPDATE TEAM MEMBER ROLE (Aman Multi-Tenant)
  */
 exports.updateTeamMember = async (req, res) => {
   try {
-    const { memberId } = req.params; // ID dari tabel tbr_teams
+    const { projectId, memberId } = req.params;
     const { role } = req.body;
+    const tenantId = req.user.tenant_id;
 
-    const [result] = await db.query(
-      `UPDATE tbr_teams SET role = ?, updated_at = NOW() WHERE id = ?`,
-      [role, memberId]
+    // Validasi berlapis: Pastikan member yang di-update berada di dalam proyek milik tenant yang sah
+    const [validCheck] = await db.query(
+      `SELECT pm.id FROM tbr_project_members pm
+       JOIN tbr_projects p ON pm.project_id = p.id
+       WHERE pm.id = ? AND p.id = ? AND p.tenant_id = ?`,
+      [memberId, projectId, tenantId]
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "Data member tidak ditemukan." });
+    if (validCheck.length === 0) {
+      return res.status(403).json({ message: "Akses Ditolak: Data tidak ditemukan atau berada di luar koridor tenant Anda." });
     }
 
-    res.json({ message: "Role member berhasil diperbarui." });
+    const cleanRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
+
+    await db.query(
+      `UPDATE tbr_project_members SET role = ?, updated_at = NOW() WHERE id = ?`,
+      [cleanRole, memberId]
+    );
+
+    res.json({ success: true, message: "Hak akses role anggota tim berhasil diperbarui secara manual." });
   } catch (err) {
     console.error("❌ UPDATE MEMBER ERROR:", err);
     res.status(500).json({ error: err.message });
@@ -107,22 +115,27 @@ exports.updateTeamMember = async (req, res) => {
 };
 
 /**
- * DELETE TEAM MEMBER
+ * 🗑️ 4. DELETE TEAM MEMBER (Aman Multi-Tenant)
  */
 exports.deleteTeamMember = async (req, res) => {
   try {
-    const { memberId } = req.params;
+    const { projectId, memberId } = req.params;
+    const tenantId = req.user.tenant_id;
 
-    const [result] = await db.query(
-      `DELETE FROM tbr_teams WHERE id = ?`, 
-      [memberId]
+    // Validasi berlapis sebelum eksekusi hapus data tim
+    const [validCheck] = await db.query(
+      `SELECT pm.id FROM tbr_project_members pm
+       JOIN tbr_projects p ON pm.project_id = p.id
+       WHERE pm.id = ? AND p.id = ? AND p.tenant_id = ?`,
+      [memberId, projectId, tenantId]
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ message: "Member tidak ditemukan." });
+    if (validCheck.length === 0) {
+      return res.status(403).json({ message: "Akses Ditolak: Data tidak valid." });
     }
 
-    res.json({ message: "Member berhasil dihapus dari tim." });
+    await db.query('DELETE FROM tbr_project_members WHERE id = ?', [memberId]);
+    res.json({ success: true, message: "Anggota tim berhasil dikeluarkan dari proyek secara manual." });
   } catch (err) {
     console.error("❌ DELETE MEMBER ERROR:", err);
     res.status(500).json({ error: err.message });

@@ -14,14 +14,14 @@ const COLUMNS = [
   { id: 'done', label: 'Completed', bg: 'bg-green-50/50', accent: 'bg-green-500', text: 'text-green-600' }
 ];
 
-const Development = ({ projectId, currentRole }) => {
+const Kanban = ({ projectId, currentRole }) => {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('board'); // 'board' or 'list'
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [currentTaskId, setCurrentTaskId] = useState(null);
-  const [syncingTaskId, setSyncingTaskId] = useState(null); // Loading state integrasi GitHub
+  const [syncingTaskId, setSyncingTaskId] = useState(null); 
   
   const [formData, setFormData] = useState({
     title: '', 
@@ -30,12 +30,13 @@ const Development = ({ projectId, currentRole }) => {
     link: ''
   });
 
-  // PERBAIKAN HAK AKSES: Mengizinkan SUPERADMIN, BUSINESSANALYST, DEVELOPER, dan TEAMDEVELOPER untuk akses CRUD
+  const normalizedRole = currentRole?.toUpperCase() || '';
   const hasWriteAccess = 
-    currentRole === 'SUPERADMIN' || 
-    currentRole === 'BUSINESSANALYST' || 
-    currentRole === 'DEVELOPER' || 
-    currentRole === 'TEAMDEVELOPER';
+    normalizedRole === 'SUPERADMIN' || 
+    normalizedRole === 'PROJECTOWNER' || 
+    normalizedRole === 'BUSINESSANALYST' || 
+    normalizedRole === 'DEVELOPER' || 
+    normalizedRole === 'TEAMDEVELOPER';
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -56,7 +57,7 @@ const Development = ({ projectId, currentRole }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!hasWriteAccess) {
-      alert('Akses Ditolak: Anda tidak memiliki otoritas mengubah data pengembangan.');
+      alert('Akses Ditolak: Anda tidak memiliki otoritas mengubah data.');
       return;
     }
 
@@ -95,23 +96,22 @@ const Development = ({ projectId, currentRole }) => {
     if (currentIndex < statusOrder.length - 1) {
       const nextStatus = statusOrder[currentIndex + 1];
       try {
-        // Optimistic UI Update untuk respon instan pada board
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: nextStatus } : t));
         await api.put(`/projects/${projectId}/developments/${taskId}/status`, { status: nextStatus });
       } catch (err) {
         console.error('Gagal memperbarui status:', err);
-        fetchTasks(); // Rollback jika API gagal
+        fetchTasks(); 
       }
     }
   };
 
   const handleDelete = async (id) => {
     if (!hasWriteAccess) {
-      alert('Akses Ditolak: Anda tidak memiliki otoritas menghapus tugas.');
+      alert('Akses Ditolak: Anda tidak memiliki otoritas menghapus data.');
       return;
     }
 
-    if (window.confirm('Hapus tugas pengembangan ini secara permanen?')) {
+    if (window.confirm('Hapus tugas ini secara permanen?')) {
       try {
         await api.delete(`/projects/${projectId}/developments/${id}`);
         setTasks(prev => prev.filter(t => t.id !== id));
@@ -147,7 +147,7 @@ const Development = ({ projectId, currentRole }) => {
   if (loading) return (
     <div className="flex h-64 flex-col items-center justify-center gap-4">
       <div className="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
-      <p className="text-slate-400 font-bold text-xs uppercase tracking-widest animate-pulse">Memuat Progres...</p>
+      <p className="text-slate-400 font-bold text-xs uppercase tracking-widest animate-pulse">Memuat Kanban...</p>
     </div>
   );
 
@@ -158,15 +158,14 @@ const Development = ({ projectId, currentRole }) => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <div className="p-4 bg-blue-600 text-white rounded-[1.5rem] shadow-xl shadow-blue-100">
-            <Activity size={24} />
+            <BoardIcon size={24} />
           </div>
           <div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tight">Development</h2>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Kelola Progres Pengembangan Proyek</p>
+            <h2 className="text-2xl font-black text-slate-800 tracking-tight">Kanban Board</h2>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Visualisasi & Kelola Progres Tugas Tim</p>
           </div>
         </div>
 
-        {/* Aksi Tambah Data & Toggle Tampilan */}
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
           {hasWriteAccess && (
             <button
@@ -177,7 +176,6 @@ const Development = ({ projectId, currentRole }) => {
             </button>
           )}
 
-          {/* Toggle Mode Tampilan (Board / List) */}
           <div className="flex items-center bg-white p-1.5 rounded-2xl border border-slate-100 shadow-sm w-full sm:w-auto justify-center">
             <button 
               onClick={() => setViewMode('board')}
@@ -199,8 +197,8 @@ const Development = ({ projectId, currentRole }) => {
       {tasks.length === 0 ? (
         <div className="py-20 text-center bg-white border-2 border-dashed border-slate-100 rounded-[3rem]">
           <Trophy className="mx-auto text-slate-100 mb-4" size={64} />
-          <h3 className="text-lg font-black text-slate-800">Mulai Pengembangan</h3>
-          <p className="text-slate-400 text-xs mt-1">Belum ada tugas pengembangan yang tercatat.</p>
+          <h3 className="text-lg font-black text-slate-800">Mulai Kanban Board</h3>
+          <p className="text-slate-400 text-xs mt-1">Belum ada tugas yang tercatat di papan ini.</p>
         </div>
       ) : (
         viewMode === 'board' ? (
@@ -322,10 +320,10 @@ const Development = ({ projectId, currentRole }) => {
 
       {/* MODAL FORM */}
       {hasWriteAccess && (
-        <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); resetForm(); }} title={isEditing ? "Edit Development Task" : "New Development Task"}>
+        <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); resetForm(); }} title={isEditing ? "Edit Task" : "New Task"}>
           <form onSubmit={handleSubmit} className="space-y-5 p-2">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Development Task Name</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Task Name</label>
               <input required type="text" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700" 
                 value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g., Setup Database Schema" />
             </div>
@@ -333,7 +331,7 @@ const Development = ({ projectId, currentRole }) => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Status</label>
-                <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 appearance-none" 
+                <select className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 appearance-none bg-white" 
                   value={formData.status} onChange={(e) => setFormData({...formData, status: e.target.value})}>
                   <option value="todo">To Do</option>
                   <option value="in_progress">In Progress</option>
@@ -349,13 +347,13 @@ const Development = ({ projectId, currentRole }) => {
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Development Details</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Task Details</label>
               <textarea className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px] text-sm" 
-                value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="Rincian pengembangan..." />
+                value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="Rincian deskripsi tugas..." />
             </div>
 
             <button type="submit" className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-[0.98] mt-4">
-              {isEditing ? 'Save Changes' : 'Save Development Task'}
+              {isEditing ? 'Save Changes' : 'Save Task'}
             </button>
           </form>
         </Modal>
@@ -364,4 +362,4 @@ const Development = ({ projectId, currentRole }) => {
   );
 };
 
-export default Development;
+export default Kanban;

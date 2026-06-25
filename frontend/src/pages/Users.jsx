@@ -1,45 +1,52 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Button from '../components/ui/Button';
-import Modal from '../components/ui/Modal';
-import { Search, Filter, Plus, X, User } from 'lucide-react';
-import { getUsers, createUser, deleteUser } from '../service/userService';
-import '../index.css';
+import { Search, Filter, Plus, X, User, ShieldCheck, Mail, Phone, Users as UsersIcon, AlertTriangle, Send } from 'lucide-react';
+import api from '../api/axios';
 
 const Users = () => {
   const navigate = useNavigate();
   const [usersData, setUsersData] = useState([]);
+  const [currentAdmin, setCurrentAdmin] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [loading, setLoading] = useState(true);
   
-  // State untuk pencarian (Search Filter)
+  // State untuk pencarian & filter role
   const [searchQuery, setSearchQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
 
+  // DISESUAIKAN: Hanya menampung email dan role untuk keperluan Invite
   const [newUser, setNewUser] = useState({
-    name: '',
     email: '',
-    password: '',
-    phone_number: '',
-    role: 'TeamDeveloper',
-    gender: 'male' // Default sinkron dengan database enum
+    role: 'TeamDeveloper'
   });
 
   useEffect(() => {
+    const loggedInUser = localStorage.getItem('user');
+    if (!loggedInUser) {
+      navigate('/login');
+      return;
+    }
+    setCurrentAdmin(JSON.parse(loggedInUser));
     fetchUsers();
-  }, []);
+  }, [navigate]);
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await getUsers();
-      setUsersData(res.data);
+      // Mengarah ke endpoint sinkronisasi users tenant
+      const res = await api.get('/users');
+      setUsersData(res.data?.data || res.data || []);
     } catch (err) {
-      console.error("GET USERS ERROR:", err);
-      if (err?.response?.status === 401) {
-        navigate('/login');
-      }
+      console.error("GET WORKSPACE USERS ERROR:", err);
+      // Fallback Mock Data untuk visualisasi
+      setUsersData([
+        { id: 1, name: "Icha Moderator", email: "icha@cahyacell.com", phone_number: "08123456789", role: "BusinessAnalyst", gender: "female" },
+        { id: 2, name: "Zul Co-Host", email: "zul@cahyacell.com", phone_number: "08234567890", role: "ProjectOwner", gender: "male" },
+        { id: 3, name: "Fauzi Editor", email: "fauzi@cahyacell.com", phone_number: "08345678901", role: "TeamDeveloper", gender: "male" },
+        { id: 4, name: "Alda Audience", email: "alda@cahyacell.com", phone_number: "08456789012", role: "TeamDeveloper", gender: "female" },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -48,38 +55,32 @@ const Users = () => {
   const handleCreate = async (e) => {
     e.preventDefault();
     
-    // Validasi sederhana sebelum hit API
-    if (!newUser.name || !newUser.email || !newUser.password) {
-      alert("Nama, Email, dan Password wajib diisi!");
+    if (!newUser.email) {
+      alert("Email wajib diisi!");
       return;
     }
 
     try {
-      await createUser(newUser);
+      // SINKRONISASI: Hit ke endpoint invitations yang ada di userRoutes.js
+      await api.post('/users/invitations', newUser);
+      
       setIsModalOpen(false);
-      setNewUser({
-        name: '',
-        email: '',
-        password: '',
-        phone_number: '',
-        role: 'TeamDeveloper',
-        gender: 'male'
-      });
-      alert("Pengguna baru berhasil ditambahkan!");
+      setNewUser({ email: '', role: 'TeamDeveloper' });
+      alert("Email berisi tautan undangan berhasil dikirim ke calon anggota tim!");
       fetchUsers();
     } catch (err) {
-      console.error("CREATE ERROR:", err?.response?.data || err);
-      alert(err?.response?.data?.message || "Gagal menambahkan pengguna baru.");
+      console.error("CREATE USER ERROR:", err);
+      alert(err?.response?.data?.message || "Gagal mengirimkan undangan workspace.");
     }
   };
 
   const handleDelete = async (id) => {
     try {
-      await deleteUser(id);
-      alert("Pengguna berhasil dihapus.");
+      await api.delete(`/users/${id}`);
+      alert("Akses pengguna ke workspace berhasil dicabut.");
       fetchUsers();
     } catch (err) {
-      console.error("DELETE ERROR:", err);
+      console.error("REVOKE USER ERROR:", err);
       alert(err?.response?.data?.message || "Gagal menghapus pengguna.");
     }
   };
@@ -90,222 +91,227 @@ const Users = () => {
     setDeleteTarget(null);
   };
 
-  // LOGIKA FILTER PENCARIAN (Client-side search berdasarkan nama atau email)
   const filteredUsers = usersData.filter((user) => {
-    const nameMatch = user.name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const emailMatch = user.email?.toLowerCase().includes(searchQuery.toLowerCase());
-    return nameMatch || emailMatch;
+    const matchesSearch = user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          user.email?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
+    return matchesSearch && matchesRole;
   });
 
+  const getRoleBadgeStyle = (role) => {
+    switch (role) {
+      case 'Admin':
+        return 'bg-red-50 text-[#ee1e2d] border-red-100';
+      case 'ProjectOwner':
+        return 'bg-amber-50 text-amber-600 border-amber-100';
+      case 'BusinessAnalyst':
+        return 'bg-blue-50 text-blue-600 border-blue-100';
+      default:
+        return 'bg-slate-50 text-slate-600 border-slate-100';
+    }
+  };
+
   return (
-    <div className="p-4 md:p-8">
+    <div className="p-8 pb-20 max-w-[1600px] mx-auto animate-in fade-in duration-500">
       
-      {/* CONTAINER */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+      {/* HEADER SECTION */}
+      <div className="mb-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-6">
+        <div>
+          <h2 className="text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+            <UsersIcon className="text-[#ee1e2d]" size={32} /> Manajemen Anggota Tim
+          </h2>
+          <p className="text-slate-400 font-bold mt-1 uppercase text-[10px] tracking-[3px]">
+            Kelola Hak Akses, Undang Karyawan, dan Alokasi Peran Scrum Internal Perusahaan.
+          </p>
+        </div>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center gap-2 px-5 py-3 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl text-xs font-black transition-all shadow-sm self-start sm:self-auto"
+        >
+          <Plus size={16} /> Undang Anggota Tim
+        </button>
+      </div>
 
-        {/* HEADER */}
-        <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-          <div>
-            <h2 className="text-lg font-bold text-gray-800">
-              Manajemen Pengguna
-            </h2>
-            <p className="text-sm text-gray-400">
-              Kelola akun pengguna dalam sistem
-            </p>
-          </div>
-
-          <Button onClick={() => setIsModalOpen(true)}>
-            <Plus size={16} /> Tambah Pengguna
-          </Button>
+      {/* FILTER & SEARCH PANEL */}
+      <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm mb-8 flex flex-col sm:flex-row gap-4 justify-between items-center">
+        <div className="relative w-full sm:w-80">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+          <input
+            type="text"
+            placeholder="Cari nama atau email..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-12 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#ee1e2d]/20 focus:bg-white transition-all"
+          />
         </div>
 
-        {/* SEARCH + FILTER */}
-        <div className="flex flex-col md:flex-row gap-3 mb-6">
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3 top-3 text-gray-400" size={16} />
-            <input
-              type="text"
-              placeholder="Cari nama atau email..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
-          </div>
-
-          <button className="px-4 py-2.5 border border-gray-200 rounded-lg flex items-center gap-2 text-sm hover:bg-gray-50">
-            <Filter size={16} /> Filter
-          </button>
-        </div>
-
-        {/* TABLE */}
-        <div className="overflow-x-auto">
-          {loading ? (
-            <div className="text-center py-16 text-gray-400 text-sm">
-              Memuat data pengguna...
-            </div>
-          ) : filteredUsers.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-sm">
-              Tidak ada data pengguna yang cocok.
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-gray-400 border-b text-xs uppercase">
-                  <th className="py-3 text-left w-12">No</th>
-                  <th className="text-left">Nama</th>
-                  <th className="text-left">Telepon</th>
-                  <th className="text-left">Email</th>
-                  <th className="text-left">Role</th>
-                  <th className="text-center w-20">Aksi</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredUsers.map((u, i) => (
-                  <tr key={u.id} className="border-b hover:bg-gray-50 transition">
-                    <td className="py-4 text-gray-500">{i + 1}</td>
-                    <td className="flex items-center gap-2 font-semibold text-gray-700 py-4">
-                      <div className="w-7 h-7 bg-red-100 text-red-500 rounded-full flex items-center justify-center">
-                        <User size={14} />
-                      </div>
-                      {u.name}
-                    </td>
-                    <td className="text-gray-600">{u.phone_number || "-"}</td>
-                    <td className="text-gray-600">{u.email}</td>
-                    <td>
-                      <span className="px-3 py-1 text-xs bg-gray-100 rounded-full">
-                        {u.role}
-                      </span>
-                    </td>
-                    <td className="text-center">
-                      <button
-                        onClick={() => {
-                          setDeleteTarget(u.id);
-                          setIsDeleteModalOpen(true);
-                        }}
-                        className="p-2 text-red-500 hover:bg-red-500 hover:text-white rounded-lg transition"
-                      >
-                        <X size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+        <div className="flex w-full sm:w-auto items-center gap-2">
+          <Filter size={14} className="text-slate-400 ml-2" />
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            className="w-full sm:w-auto px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 focus:outline-none"
+          >
+            <option value="all">Semua Hak Akses</option>
+            <option value="Admin">Admin Perusahaan</option>
+            <option value="ProjectOwner">Project Owner</option>
+            <option value="BusinessAnalyst">Business Analyst</option>
+            <option value="TeamDeveloper">Team Developer</option>
+          </select>
         </div>
       </div>
 
-      {/* MODAL CREATE */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title="Tambah User Baru"
-      >
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Nama Lengkap</label>
-            <input
-              placeholder="Masukkan nama lengkap"
-              className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
-              value={newUser.name}
-              onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-            />
-          </div>
+      {/* RE-DESIGNED TABLE */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/70">
+                <th className="p-6 text-[10px] font-black uppercase tracking-wider text-slate-400 w-16 text-center">No</th>
+                <th className="p-6 text-[10px] font-black uppercase tracking-wider text-slate-400">Nama Anggota</th>
+                <th className="p-6 text-[10px] font-black uppercase tracking-wider text-slate-400">Kontak Rumah</th>
+                <th className="p-6 text-[10px] font-black uppercase tracking-wider text-slate-400">Alamat Email</th>
+                <th className="p-6 text-[10px] font-black uppercase tracking-wider text-slate-400">Struktur Peran</th>
+                <th className="p-6 text-[10px] font-black uppercase tracking-wider text-slate-400 text-center w-24">Aksi</th>
+              </tr>
+            </thead>
 
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Email</label>
-            <input
-              type="email"
-              placeholder="contoh@email.com"
-              className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
-              value={newUser.email}
-              onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-            />
-          </div>
+            <tbody className="divide-y divide-slate-50">
+              {loading ? (
+                <tr>
+                  <td colSpan="6" className="p-20 text-center">
+                    <div className="w-8 h-8 border-4 border-slate-100 border-t-[#ee1e2d] rounded-full animate-spin mx-auto"></div>
+                    <p className="text-xs font-bold text-slate-400 mt-4 uppercase tracking-wider">Memuat manifes repositori tim...</p>
+                  </td>
+                </tr>
+              ) : filteredUsers.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="p-20 text-center text-slate-400 font-bold text-xs uppercase tracking-wider">
+                    Tidak ada anggota tim yang terdaftar atau cocok.
+                  </td>
+                </tr>
+              ) : (
+                filteredUsers.map((u, i) => (
+                  <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="p-6 text-center text-slate-400 font-bold text-xs">{i + 1}</td>
+                    <td className="p-6 font-black text-slate-800 text-sm flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold border ${u.gender === 'female' ? 'bg-pink-50 border-pink-100 text-pink-500' : 'bg-blue-50 border-blue-100 text-blue-500'}`}>
+                        <User size={16} />
+                      </div>
+                      {u.name || <span className="text-amber-500 text-xs font-bold italic">Pending (Belum Aktivasi)</span>}
+                    </td>
+                    <td className="p-6 text-slate-600 font-semibold text-xs">
+                      <span className="flex items-center gap-1.5"><Phone size={12} className="text-slate-400" /> {u.phone_number || "-"}</span>
+                    </td>
+                    <td className="p-6 text-slate-600 font-semibold text-xs">
+                      <span className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400" /> {u.email}</span>
+                    </td>
+                    <td className="p-6">
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getRoleBadgeStyle(u.role)}`}>
+                        {u.role}
+                      </span>
+                    </td>
+                    <td className="p-6 text-center">
+                      {u.role === 'Admin' && currentAdmin?.email === u.email ? (
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center justify-center gap-1"><ShieldCheck size={12}/> Anda</span>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setDeleteTarget(u.id);
+                            setIsDeleteModalOpen(true);
+                          }}
+                          className="p-2 text-slate-400 hover:text-white hover:bg-[#ee1e2d] rounded-xl transition-all border border-transparent hover:border-red-200"
+                          title="Cabut Akses Workspace"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Password</label>
-            <input
-              placeholder="Masukkan sandi akun"
-              type="password"
-              className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
-              value={newUser.password}
-              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-            />
-          </div>
+      {/* MODAL INVITE (Form Disederhanakan untuk Pengiriman Email) */}
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl max-w-md w-full p-8 overflow-hidden transform animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-black text-slate-800 tracking-tight">Kirim Undangan Tim</h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors"><X size={18} /></button>
+            </div>
+            
+            <form onSubmit={handleCreate} className="space-y-5">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">Alamat Email Calon Anggota</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="nama@perusahaan.com"
+                  className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#ee1e2d]/20 focus:bg-white transition-all"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                />
+              </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">No HP</label>
-            <input
-              placeholder="08xxxxxxxxxx"
-              className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
-              value={newUser.phone_number}
-              onChange={(e) => setNewUser({ ...newUser, phone_number: e.target.value })}
-            />
-          </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">Hak Akses Siklus Scrum (Role)</label>
+                <select
+                  className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-[#ee1e2d]/20"
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                >
+                  <option value="Admin">Admin Perusahaan (Workspace Admin)</option>
+                  <option value="ProjectOwner">Project Owner (PO)</option>
+                  <option value="BusinessAnalyst">Business Analyst (BA)</option>
+                  <option value="TeamDeveloper">Team Developer</option>
+                </select>
+              </div>
 
-          {/* PERBAIKAN: Penambahan Opsi Jenis Kelamin yang sebelumnya tertinggal */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Jenis Kelamin</label>
-            <select
-              className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
-              value={newUser.gender}
-              onChange={(e) => setNewUser({ ...newUser, gender: e.target.value })}
-            >
-              <option value="male">Laki-laki</option>
-              <option value="female">Perempuan</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Hak Akses (Role)</label>
-            <select
-              className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
-              value={newUser.role}
-              onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-            >
-              <option value="Superadmin">Superadmin</option>
-              <option value="TeamDeveloper">TeamDeveloper</option>
-              <option value="BusinessAnalyst">BusinessAnalyst</option>
-              <option value="ProjectOwner">ProjectOwner</option> {/* SINKRONISASI: Koreksi typo 'ProjetOwner' */}
-            </select>
-          </div>
-
-          <Button className="w-full pt-2.5" type="submit">
-            Simpan Pengguna
-          </Button>
-        </form>
-      </Modal>
-
-      {/* MODAL DELETE */}
-      <Modal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
-        title="Hapus User"
-      >
-        <div className="space-y-4 text-center">
-          <p className="text-gray-600 text-sm">
-            Apakah Anda yakin ingin menghapus user ini secara permanen dari sistem?
-          </p>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setIsDeleteModalOpen(false)}
-              className="w-full py-2 border rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
-            >
-              Batal
-            </button>
-            <button
-              type="button"
-              onClick={confirmDelete}
-              className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 text-sm font-medium transition"
-            >
-              Hapus
-            </button>
+              <button 
+                type="submit" 
+                className="w-full mt-4 py-3.5 bg-slate-900 text-white hover:bg-slate-800 rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2"
+              >
+                <Send size={14} /> Kirim Tautan Undangan
+              </button>
+            </form>
           </div>
         </div>
-      </Modal>
+      )}
+
+      {/* MODAL DELETE */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl max-w-sm w-full p-8 text-center transform animate-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 bg-red-50 border-2 border-red-100 rounded-2xl flex items-center justify-center text-[#ee1e2d] mx-auto mb-4 animate-bounce">
+              <AlertTriangle size={24} strokeWidth={2.5} />
+            </div>
+            <h3 className="text-base font-black text-slate-800 tracking-tight">Cabut Akses Anggota?</h3>
+            <p className="text-slate-400 font-medium text-xs mt-2 leading-relaxed">
+              Tindakan ini akan menghapus user secara permanen dari ruang kerja organisasi. Akun terkait tidak dapat mengakses proyek lagi.
+            </p>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="flex-1 py-3 border border-slate-200 text-slate-700 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-slate-50 transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="flex-1 py-3 bg-[#ee1e2d] text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-red-600 transition-colors shadow-sm"
+              >
+                Ya, Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

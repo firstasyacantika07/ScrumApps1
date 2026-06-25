@@ -23,7 +23,7 @@ const Billing = () => {
   const [loadingTrial, setLoadingTrial] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
 
-  // State Subscription terintegrasi dengan field database tbr_users + flag notifikasi baru
+  // State Subscription terintegrasi dengan field database tbr_users
   const [subscription, setSubscription] = useState({
     plan: 'FREE',
     status: 'ACTIVE',
@@ -31,9 +31,10 @@ const Billing = () => {
     trialUsed: false,
     endDate: null,
     expiredTrial: false,
-    expiredSubscription: false, // Flag baru
+    expiredSubscription: false,
     paymentMethod: 'Midtrans',
     totalSpent: 0,
+    remainingDays: 0, // Pindahkan kalkulasi sisa hari ke dalam state
   });
 
   const [plans, setPlans] = useState([]);
@@ -58,11 +59,19 @@ const Billing = () => {
       // SINKRONISASI DATABASE: Menggunakan user.trial_end atau user.subscription_ends_at
       const targetEndDate = user.trial_end || user.subscription_ends_at || null;
 
-      // Cek kedaluwarsa secara realtime (gabungan respons backend & kalkulasi mandiri)
+      // Cek kedaluwarsa secara realtime
       const isTrialExpired = !!user.expired_trial || (targetEndDate && new Date(targetEndDate) < new Date() && userCycle === 'TRIAL');
       const isSubExpired = !!user.expired_subscription || (targetEndDate && new Date(targetEndDate) < new Date() && userPlan !== 'FREE' && userCycle !== 'TRIAL');
       
       const isGlobalExpired = userStatus === 'EXPIRED' || isTrialExpired || isSubExpired;
+
+      // Hitung sisa hari secara aman di sini
+      let daysLeft = 0;
+      if (targetEndDate) {
+        const targetDate = new Date(targetEndDate);
+        const diffTime = !isNaN(targetDate.getTime()) ? targetDate - new Date() : 0;
+        daysLeft = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+      }
 
       setSubscription({
         plan: userPlan,
@@ -74,12 +83,13 @@ const Billing = () => {
         expiredSubscription: isSubExpired,
         paymentMethod: 'Midtrans',
         totalSpent: user.total_spent ? Number(user.total_spent) : 0,
+        remainingDays: daysLeft,
       });
 
     } catch (err) {
       console.error("Gagal memuat profil pengguna:", err);
     } finally {
-      loadingProfile && setLoadingProfile(false);
+      setLoadingProfile(false); // Perbaikan: Langsung eksekusi tanpa short-circuit evaluasi cond
     }
   };
 
@@ -183,7 +193,7 @@ const Billing = () => {
     }
   };
 
-  const handleBuyPlan = async (plan) => {
+  const handleBuyPlan = async (plan, cycle = 'MONTHLY') => {
     try {
       if (Number(plan.id) === 3) {
         alert('Silakan hubungi sales untuk migrasi ke paket Enterprise.');
@@ -196,7 +206,7 @@ const Billing = () => {
       const res = await api.post('/payment/create-transaction', {
         planId: Number(plan.id),
         planName: plan.name,
-        billingCycle: 'MONTHLY', 
+        billingCycle: cycle, // Menggunakan cycle dinamis jika ke depan ditambahkan opsi tahunan
       });
 
       const data = res.data;
@@ -211,8 +221,8 @@ const Billing = () => {
           redirectUrl: data.redirect_url,
           orderId: data.order_id,
           planName: plan.name,
-          price: plan.monthlyPrice,
-          period: '/bulan',
+          price: cycle === 'YEARLY' ? plan.yearlyPrice : plan.monthlyPrice,
+          period: cycle === 'YEARLY' ? '/tahun' : '/bulan',
         },
       });
     } catch (error) {
@@ -232,7 +242,7 @@ const Billing = () => {
       alert('Anda sudah berada di paket FREE.');
       return;
     }
-    handleBuyPlan(plan);
+    handleBuyPlan(plan, 'MONTHLY');
   };
 
   const formatRupiah = (value) => {
@@ -245,19 +255,6 @@ const Billing = () => {
     }).format(value);
   };
 
-  if (loadingProfile) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
-        <Loader2 className="animate-spin text-red-500" size={40} />
-        <p className="text-slate-500 font-medium text-sm">Memuat data langganan...</p>
-      </div>
-    );
-  }
-
-  const targetDate = subscription.endDate ? new Date(subscription.endDate) : null;
-  const diffTime = (targetDate && !isNaN(targetDate.getTime())) ? targetDate - new Date() : 0;
-  const remainingDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
-
   const formatLocalDate = (dateString) => {
     if (!dateString) return "-";
     try {
@@ -268,6 +265,15 @@ const Billing = () => {
       return dateString;
     }
   };
+
+  if (loadingProfile) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-3">
+        <Loader2 className="animate-spin text-red-500" size={40} />
+        <p className="text-slate-500 font-medium text-sm">Memuat data langganan...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
@@ -329,7 +335,7 @@ const Billing = () => {
                   </h2>
                   <p className="text-slate-500 mt-2">
                     {subscription.status === 'TRIALING' 
-                      ? `Masa uji coba aktif. Berakhir dalam ${remainingDays} hari lagi.` 
+                      ? `Masa uji coba aktif. Berakhir dalam ${subscription.remainingDays} hari lagi.` 
                       : subscription.status === 'EXPIRED' 
                       ? "Akses Premium Terputus. Silakan lakukan pembayaran ulang untuk mengaktifkan kembali." 
                       : "Paket aktif saat ini."}
@@ -473,7 +479,7 @@ const Billing = () => {
                       <button
                         type="button"
                         disabled={subscription.plan === 'PRO' && subscription.status !== 'EXPIRED'}
-                        onClick={() => handleBuyPlan(plan)}
+                        onClick={() => handleBuyPlan(plan, 'MONTHLY')}
                         className={`w-full h-12 rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 ${
                           subscription.plan === 'PRO' && subscription.status !== 'EXPIRED'
                             ? 'bg-slate-100 text-slate-400 cursor-not-allowed'

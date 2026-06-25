@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { Plus, Trash2, Edit, Target, Users, ShoppingBag, BarChart3, ShieldAlert } from 'lucide-react';
 import api from '../../api/axios';
 import Modal from '../ui/Modal';
 
-const VisionBoard = ({ projectId, currentRole }) => {
+// Menggunakan forwardRef agar ProjectDetail bisa memicu fungsi openNewBoardModal() secara langsung
+const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
   const [visions, setVisions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -19,7 +20,6 @@ const VisionBoard = ({ projectId, currentRole }) => {
     competitors: ''
   });
 
-  // Validasi role internal (Menyesuaikan otorisasi SUPERADMIN dan BUSINESSANALYST)
   const isSuperAdmin = currentRole === 'SUPERADMIN';
   const isBA = currentRole === 'BUSINESSANALYST';
   const hasWriteAccess = isSuperAdmin || isBA;
@@ -40,6 +40,26 @@ const VisionBoard = ({ projectId, currentRole }) => {
   useEffect(() => {
     fetchVisions();
   }, [fetchVisions]);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setFormData({
+      name: '', vision: '', target_group: '', needs: '',
+      products: '', business_goals: '', competitors: ''
+    });
+  };
+
+  // Mengekspos fungsi membuka modal tambah ke Parent (ProjectDetail)
+  useImperativeHandle(ref, () => ({
+    openNewBoardModal() {
+      if (!hasWriteAccess) {
+        alert("Akses ditolak: Anda tidak memiliki otoritas untuk menambah data.");
+        return;
+      }
+      resetForm();
+      setIsModalOpen(true);
+    }
+  }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -79,22 +99,14 @@ const VisionBoard = ({ projectId, currentRole }) => {
     setEditingId(item.id);
     setFormData({
       name: item.name,
-      vision: item.vision,
-      target_group: item.target_group,
-      needs: item.needs,
-      products: item.products,
-      business_goals: item.business_goals,
-      competitors: item.competitors
+      vision: item.vision || '',
+      target_group: item.target_group || '',
+      needs: item.needs || '',
+      products: item.products || '',
+      business_goals: item.business_goals || '',
+      competitors: item.competitors || ''
     });
     setIsModalOpen(true);
-  };
-
-  const resetForm = () => {
-    setEditingId(null);
-    setFormData({
-      name: '', vision: '', target_group: '', needs: '',
-      products: '', business_goals: '', competitors: ''
-    });
   };
 
   return (
@@ -106,8 +118,6 @@ const VisionBoard = ({ projectId, currentRole }) => {
           </h2>
           <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Product Strategy & Goals</p>
         </div>
-        
-        {/* 🛠️ PERBAIKAN: Tombol "Add Board" lokal dihilangkan dari sini karena sudah dihandle tombol biru di ProjectDetail */}
       </div>
 
       {loading ? (
@@ -130,7 +140,6 @@ const VisionBoard = ({ projectId, currentRole }) => {
               <div className="bg-slate-50/70 px-8 py-4 flex justify-between items-center border-b border-slate-100">
                 <h3 className="font-black text-slate-700 uppercase tracking-tighter text-lg">{item.name}</h3>
                 
-                {/* Aksi Edit/Delete hanya muncul jika user memiliki Write Access */}
                 {hasWriteAccess && (
                   <div className="flex gap-2">
                     <button onClick={() => handleEditClick(item)} className="p-2 bg-white rounded-xl text-blue-500 shadow-sm hover:bg-blue-50 transition-colors" title="Edit Board">
@@ -147,27 +156,27 @@ const VisionBoard = ({ projectId, currentRole }) => {
               <div className="grid md:grid-cols-4 gap-px bg-slate-100">
                 <div className="bg-white p-6 col-span-2">
                   <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><Target size={14} className="text-red-500"/> Vision</label>
-                  <div className="text-slate-600 text-sm leading-relaxed whitespace-pre-line" dangerouslySetInnerHTML={{ __html: item.vision }} />
+                  <p className="text-slate-600 text-sm leading-relaxed whitespace-pre-line">{item.vision || '-'}</p>
                 </div>
                 <div className="bg-white p-6">
                   <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><Users size={14} className="text-blue-500"/> Target Group</label>
-                  <div className="text-slate-600 text-sm whitespace-pre-line" dangerouslySetInnerHTML={{ __html: item.target_group }} />
+                  <p className="text-slate-600 text-sm whitespace-pre-line">{item.target_group || '-'}</p>
                 </div>
                 <div className="bg-white p-6">
                   <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShoppingBag size={14} className="text-emerald-500"/> Needs</label>
-                  <div className="text-slate-600 text-sm whitespace-pre-line" dangerouslySetInnerHTML={{ __html: item.needs }} />
+                  <p className="text-slate-600 text-sm whitespace-pre-line">{item.needs || '-'}</p>
                 </div>
                 <div className="bg-white p-6">
                   <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShoppingBag size={14} className="text-orange-500"/> Products</label>
-                  <div className="text-slate-600 text-sm whitespace-pre-line" dangerouslySetInnerHTML={{ __html: item.products }} />
+                  <p className="text-slate-600 text-sm whitespace-pre-line">{item.products || '-'}</p>
                 </div>
                 <div className="bg-white p-6 col-span-2">
                   <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><BarChart3 size={14} className="text-purple-500"/> Business Goals</label>
-                  <div className="text-slate-600 text-sm whitespace-pre-line" dangerouslySetInnerHTML={{ __html: item.business_goals }} />
+                  <p className="text-slate-600 text-sm whitespace-pre-line">{item.business_goals || '-'}</p>
                 </div>
                 <div className="bg-white p-6 col-span-2">
                   <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShieldAlert size={14} className="text-amber-500"/> Competitors</label>
-                  <div className="text-slate-600 text-sm whitespace-pre-line" dangerouslySetInnerHTML={{ __html: item.competitors }} />
+                  <p className="text-slate-600 text-sm whitespace-pre-line">{item.competitors || '-'}</p>
                 </div>
               </div>
             </div>
@@ -175,9 +184,9 @@ const VisionBoard = ({ projectId, currentRole }) => {
         </div>
       )}
 
-      {/* MODAL EDITOR (Hanya untuk Edit Data Lokal Komponen) */}
+      {/* MODAL EDITOR */}
       {hasWriteAccess && (
-        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Vision Board Editor">
+        <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? "Edit Vision Board" : "Create Vision Board"}>
           <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto px-2">
             <div>
               <label className="text-[10px] font-black text-slate-400 uppercase">Board Name</label>
@@ -242,13 +251,13 @@ const VisionBoard = ({ projectId, currentRole }) => {
             </div>
 
             <button className="w-full bg-red-500 text-white p-4 rounded-2xl font-black uppercase tracking-widest hover:bg-red-600 transition-colors sticky bottom-0 shadow-lg text-xs">
-              Save Changes
+              {editingId ? 'Save Changes' : 'Create New Board'}
             </button>
           </form>
         </Modal>
       )}
     </div>
   );
-};
+});
 
 export default VisionBoard;

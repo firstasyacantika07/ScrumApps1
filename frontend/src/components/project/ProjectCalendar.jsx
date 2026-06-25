@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -11,12 +11,12 @@ import api from '../../api/axios';
 
 const CalendarPage = ({ projectId }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [events, setEvents] = useState([]);
+  const [rawEvents, setEvents] = useState([]);
   const [sprints, setSprints] = useState([]);
   const [selectedSprintId, setSelectedSprintId] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Format Date ke string YYYY-MM-DD lokal (Mencegah pergeseran timezone ISO)
+  // Format Date ke string YYYY-MM-DD lokal
   const formatLocalDate = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -24,11 +24,11 @@ const CalendarPage = ({ projectId }) => {
     return `${year}-${month}-${day}`;
   };
 
-  // Validasi tahun rasional untuk mencegah bug database (seperti tahun 0226 atau 0000)
+  // Validasi tahun rasional untuk mencegah bug database
   const getSafeSprintDate = (dateString) => {
     if (!dateString || dateString.startsWith('0000')) return null;
     const year = parseInt(dateString.split('-')[0], 10);
-    if (isNaN(year) || year < 1970 || year > 2100) return null; // Abaikan jika tahun tidak valid
+    if (isNaN(year) || year < 1970 || year > 2100) return null;
     return new Date(dateString);
   };
 
@@ -46,7 +46,6 @@ const CalendarPage = ({ projectId }) => {
       setSprints(resSprint.data || []);
 
       if (resSprint.data && resSprint.data.length > 0) {
-        // Cari sprint aktif atau ambil sprint pertama sebagai fallback
         const activeSprint = resSprint.data.find(s => s.status?.toLowerCase() === 'active') || resSprint.data[0];
         setSelectedSprintId(activeSprint.id.toString());
         
@@ -68,7 +67,22 @@ const CalendarPage = ({ projectId }) => {
 
   const currentSprint = sprints.find(s => s.id.toString() === selectedSprintId);
 
-  // Handler dropdown: langsung pindahkan fokus bulan kalender ke start_date sprint terpilih
+  // Optimasi Performa: Pre-parsing tanggal event agar tidak melakukan "new Date()" berulang kali di dalam loop grid
+  const processedEvents = useMemo(() => {
+    return rawEvents.map(e => {
+      // Prioritaskan start_date/end_date pengerjaan, fallback ke created_at jika kosong
+      const targetStart = e.start_date || e.created_at;
+      const targetEnd = e.end_date || targetStart;
+
+      return {
+        ...e,
+        parsedStartStr: targetStart ? formatLocalDate(new Date(targetStart)) : null,
+        parsedStartTime: targetStart ? new Date(targetStart).setHours(0,0,0,0) : null,
+        parsedEndTime: targetEnd ? new Date(targetEnd).setHours(23,59,59,999) : null
+      };
+    });
+  }, [rawEvents]);
+
   const handleSprintChange = (e) => {
     const sprintId = e.target.value;
     setSelectedSprintId(sprintId);
@@ -98,7 +112,6 @@ const CalendarPage = ({ projectId }) => {
     setCurrentDate(today);
     
     if (sprints.length > 0) {
-      // Cari sprint yang rentang waktunya melingkupi hari ini
       const overlappingSprint = sprints.find(s => {
         const safeStart = getSafeSprintDate(s.start_date);
         const safeEnd = getSafeSprintDate(s.end_date);
@@ -219,9 +232,9 @@ const CalendarPage = ({ projectId }) => {
           
           {days.map((day) => {
             const thisDate = new Date(year, month, day);
+            const thisDateTime = thisDate.getTime();
             const dateStr = formatLocalDate(thisDate);
 
-            // Cek apakah tanggal saat ini masuk ke dalam zone rentang sprint terpilih
             let isInsideSprint = false;
             const safeStart = currentSprint ? getSafeSprintDate(currentSprint.start_date) : null;
             const safeEnd = currentSprint ? getSafeSprintDate(currentSprint.end_date) : null;
@@ -232,11 +245,17 @@ const CalendarPage = ({ projectId }) => {
               isInsideSprint = thisDate >= start && thisDate <= end;
             }
 
-            // Filter Task/Development yang dibuat pada hari ini (hanya jika berada di zona sprint aktif)
-            const dayEvents = events.filter(e => {
-              if (!e.created_at) return false;
-              const eventDateStr = formatLocalDate(new Date(e.created_at));
-              return eventDateStr === dateStr && isInsideSprint;
+            // Memfilter event menggunakan properti tanggal yang sudah di-parse (Lebih Ringan & Cepat)
+            const dayEvents = processedEvents.filter(e => {
+              if (!e.parsedStartStr) return false;
+
+              // Kondisi 1: Jika task berbentuk rentang waktu pengerjaan (Berjalan menggunakan timestamp angka)
+              if (e.start_date && e.end_date) {
+                return thisDateTime >= e.parsedStartTime && thisDateTime <= e.parsedEndTime && isInsideSprint;
+              }
+              
+              // Kondisi 2: Jika single deadline / target date saja
+              return e.parsedStartStr === dateStr && isInsideSprint;
             });
 
             const isToday = formatLocalDate(new Date()) === dateStr;
@@ -266,7 +285,6 @@ const CalendarPage = ({ projectId }) => {
                 <div className="mt-2 space-y-1 overflow-y-auto max-h-[72px] pr-0.5 custom-scrollbar">
                   {dayEvents.map((event) => {
                     const cleanStatus = event.status?.toLowerCase() || 'planned';
-                    // Sinkronisasi status selesai (completed / done)
                     const isCompleted = cleanStatus === 'completed' || cleanStatus === 'done';
                     
                     return (
@@ -274,8 +292,8 @@ const CalendarPage = ({ projectId }) => {
                         key={event.id}
                         className={`text-[9px] p-1.5 rounded-lg border flex items-center gap-1 font-bold truncate transition-all ${
                           isCompleted 
-                            ? 'bg-green-50 text-green-700 border-green-100' // Hijau jika Selesai
-                            : 'bg-blue-50 text-blue-700 border-blue-100'    // Biru jika Active / Progress
+                            ? 'bg-green-50 text-green-700 border-green-100' 
+                            : 'bg-blue-50 text-blue-700 border-blue-100'
                         }`}
                         title={`${event.name} (${cleanStatus.toUpperCase()})`}
                       >

@@ -1,63 +1,100 @@
 const db = require('../config/db');
 
-const checkPlan = async (req, res, next) => {
+/**
+ * 🏢 VALIDATOR 1: Memeriksa Kuota Pembuatan Proyek
+ */
+const checkProjectLimit = async (req, res, next) => {
   try {
-    // 1. Pastikan user sudah melewati middleware verifyJWT sebelumnya
+    // 1. Manfaatkan cache data user & tenant yang sudah diekstrak oleh verifyToken sebelumnya
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: "Akses Ditolak: Sesi tidak valid atau kedaluwarsa." });
     }
 
-    // 2. Ambil data paket & status berlangganan langsung dari database (Realtime Validation)
-    // Menggunakan kolom trial_end dan subscription_ends_at yang baru kita rapikan
-    const [rows] = await db.query(
-      `SELECT package_type, subscription_status, billing_cycle, trial_end, subscription_ends_at 
-       FROM tbr_users WHERE id = ? LIMIT 1`,
-      [req.user.id]
-    );
+    const tenantId = req.user.tenant_id;
+    const tenantPackage = req.user.package_type || 'FREE';
+    const subStatus = req.user.subscription_status || 'active';
 
-    const userDb = rows[0];
-
-    if (!userDb) {
-      return res.status(404).json({ message: "Pengguna tidak ditemukan." });
+    if (!tenantId) {
+      return res.status(404).json({ message: "Data perusahaan/workspace tidak ditemukan." });
     }
 
-    const now = new Date();
-    const userPackage = userDb.package_type || 'FREE';
-    const subStatus = userDb.subscription_status || 'active';
-
-    // 3. Validasi Masa Kedaluwarsa Langganan / Trial
+    // 2. Blokir jika status perusahaan terdeteksi kedaluwarsa dari verifyToken
     if (subStatus === 'expired') {
       return res.status(403).json({ 
-        message: "Akses Terkunci: Masa langganan atau trial Anda telah habis. Silakan lakukan pembaruan paket." 
+        message: "Akses Terkunci: Masa langganan atau trial workspace Anda telah habis. Silakan lakukan pembaruan paket." 
       });
     }
 
-    // Pengecekan ekstra jika status di DB belum ter-update tapi tanggal sudah lewat
-    const expiryDate = userDb.billing_cycle === 'TRIAL' ? userDb.trial_end : userDb.subscription_ends_at;
-    if (expiryDate && now > new Date(expiryDate)) {
-      // Update otomatis status ke expired
-      await db.query(`UPDATE tbr_users SET subscription_status = 'expired' WHERE id = ?`, [req.user.id]);
+    // 3. HITUNG JUMLAH PROYEK YANG SUDAH DIBUAT TIM/TENANT INI
+    const [projectRows] = await db.query(
+      'SELECT COUNT(*) as total_projects FROM tbr_projects WHERE tenant_id = ?',
+      [tenantId]
+    );
+    const currentProjects = projectRows[0].total_projects;
+
+    // 4. EVALUASI BATASAN KUOTA PROYEK SESUAI ATURAN BISNIS
+    if (tenantPackage === 'FREE' && currentProjects >= 1) {
       return res.status(403).json({ 
-        message: "Akses Terkunci: Masa berlaku paket Anda telah kedaluwarsa." 
+        message: "Batas Paket FREE: Anda hanya dapat membuat maksimal 1 proyek. Silakan hubungi Admin Workspace untuk upgrade ke paket PRO!" 
       });
     }
 
-    // 4. Penentuan Batasan Limit Berdasarkan Paket Kontrak (Plan Limit Assignment)
-    console.log(`[PlanCheck] User ID: ${req.user.id} | Package: ${userPackage} | Status: ${subStatus}`);
-
-    if (userPackage === 'FREE') {
-      req.planLimit = 1; // Batasan maksimal untuk user paket FREE (Misal: maks 5 project/sprint)
-    } else {
-      req.planLimit = 5; // Kuota tak terbatas untuk user paket PRO / PREMIUM
+    if (tenantPackage === 'PRO' && currentProjects >= 15) {
+      return res.status(403).json({ 
+        message: "Batas Paket PRO: Anda telah mencapai batas maksimal 15 proyek. Silakan upgrade ke paket ENTERPRISE untuk kuota tanpa batas." 
+      });
     }
 
-    // Teruskan ke controller berikutnya
+    // Teruskan ke controller pembuatan proyek jika lolos kuota
     next();
-
   } catch (error) {
-    console.error("CHECKPLAN MIDDLEWARE ERROR:", error);
-    res.status(500).json({ message: "Terjadi kesalahan pada sistem pengecekan paket aplikasi." });
+    console.error("CHECK PROJECT LIMIT ERROR:", error);
+    res.status(500).json({ message: "Terjadi kesalahan pada sistem pengecekan kuota proyek." });
   }
 };
 
-module.exports = { checkPlan };
+/**
+ * 👥 VALIDATOR 2: Memeriksa Kuota Anggota di Dalam Proyek
+ */
+const checkTeamLimit = async (req, res, next) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: "Akses Ditolak: Sesi tidak valid." });
+    }
+
+    // 🔥 FIX SINKRONISASI: Ambil dari req.params sesuai struktur routing /:projectId/members
+    const projectId = req.params.projectId || req.body.project_id; 
+    const tenantPackage = req.user.package_type || 'FREE';
+
+    if (!projectId) {
+      return res.status(400).json({ message: "ID Proyek diperlukan untuk memeriksa kuota tim." });
+    }
+
+    // Hitung jumlah anggota tim yang terdaftar di proyek ini secara realtime
+    const [memberRows] = await db.query(
+      'SELECT COUNT(*) as total_members FROM tbr_project_members WHERE project_id = ?',
+      [projectId]
+    );
+    const currentTeamSize = memberRows[0].total_members;
+
+    // EVALUASI BATASAN KUOTA TIM SESUAI ATURAN BISNIS
+    if (tenantPackage === 'FREE' && currentTeamSize >= 5) {
+      return res.status(403).json({ 
+        message: "Batas Paket FREE: Maksimal 5 anggota per proyek. Silakan upgrade ke paket PRO!" 
+      });
+    }
+
+    if (tenantPackage === 'PRO' && currentTeamSize >= 25) {
+      return res.status(403).json({ 
+        message: "Batas Paket PRO: Maksimal 25 anggota per proyek. Hubungi pihak Enterprise untuk kuota unlimited." 
+      });
+    }
+
+    next();
+  } catch (error) {
+    console.error("CHECK TEAM LIMIT ERROR:", error);
+    res.status(500).json({ message: "Terjadi kesalahan pada sistem pengecekan kuota tim." });
+  }
+};
+
+module.exports = { checkProjectLimit, checkTeamLimit };

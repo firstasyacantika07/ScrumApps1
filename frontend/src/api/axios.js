@@ -2,6 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  timeout: 10000, // Tambahan opsional: timeout 10 detik agar UI tidak hang jika server overload
 });
 
 // ======================================================
@@ -55,9 +56,13 @@ api.interceptors.response.use(
     const originalRequest = error.config;
 
     // ✨ PENJINAKAN ERROR 409 CONFLICT (Kasus Webhook GitHub Duplikat)
-    // Jika backend melempar 409 karena webhook sudah terdaftar, jinakkan di sini 
-    // agar di sisi Frontend React masuk ke blok 'try' dan tidak mengotori console browser.
-    if (error.response && error.response.status === 409 && originalRequest.url.includes('/github-webhooks')) {
+    // 🔥 OPTIMASI: Ditambahkan .toLowerCase() agar deteksi kebal terhadap variasi penulisan endpoint URL
+    if (
+      error.response && 
+      error.response.status === 409 && 
+      originalRequest.url && 
+      originalRequest.url.toLowerCase().includes('github-webhooks')
+    ) {
       console.log('ℹ️ Webhook sudah dikonfigurasi sebelumnya. Menjinakkan status 409 menjadi sukses.');
       
       // Manipulasi response error menjadi bentuk response sukses tiruan
@@ -82,7 +87,8 @@ api.interceptors.response.use(
       
       // Maksa browser kembali ke login secara bersih jika tidak di dalam proses refresh token
       if (!originalRequest._retry && typeof window !== 'undefined') {
-        window.location.href = '/login';
+        // Gunakan replace agar user tidak terjebak dalam loop tombol "back" di browser
+        window.location.replace('/login');
       }
     }
 

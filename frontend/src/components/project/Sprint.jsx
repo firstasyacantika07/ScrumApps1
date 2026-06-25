@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, forwardRef, useImperativeHandle } from 'react'; // 🛠️ Tambahkan forwardRef & useImperativeHandle
 import { 
   Search, Calendar, Trash2, Edit3, Plus, ClipboardCheck, History
 } from 'lucide-react';
 import api from '../../api/axios';
 import Modal from '../ui/Modal';
 
-const Sprint = ({ projectId, currentRole }) => {
+const Sprint = forwardRef(({ projectId, currentRole }, ref) => { // 🛠️ Bungkus dengan forwardRef
   const [sprints, setSprints] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -27,6 +27,18 @@ const Sprint = ({ projectId, currentRole }) => {
   const isBA = currentRole === 'BUSINESSANALYST';
   const hasWriteAccess = isSuperAdmin || isBA;
 
+  // 🛠️ Ekspos fungsi ke Parent (ProjectDetail) agar bisa membuka modal tambah dari luar
+  useImperativeHandle(ref, () => ({
+    openNewSprintModal() {
+      if (!hasWriteAccess) {
+        alert("Akses Ditolak: Anda tidak memiliki otoritas mengubah data sprint.");
+        return;
+      }
+      resetForm();
+      setIsModalOpen(true);
+    }
+  }));
+
   useEffect(() => {
     if (projectId) fetchSprints();
   }, [projectId]);
@@ -43,18 +55,15 @@ const Sprint = ({ projectId, currentRole }) => {
     }
   };
 
-  // PENGAMAN TANGGAL INPUT: Cegah crash format 0000-00-00 dan typo tahun di bawah era modern
   const formatDateForInput = (dateString) => {
     if (!dateString || dateString.startsWith('0000') || dateString.startsWith('00')) return '';
     if (dateString.includes('T')) return dateString.split('T')[0];
     return dateString.split(' ')[0];
   };
 
-  // PENGAMAN TANGGAL VIEW: Menampilkan text alternatif jika tanggal tidak rasional
   const formatHumanDate = (dateString) => {
     if (!dateString || dateString.startsWith('0000')) return '-';
     
-    // Pecah string untuk cek tahun (mengantisipasi typo tahun seperti 0226)
     const yearCheck = parseInt(dateString.split('-')[0], 10);
     if (isNaN(yearCheck) || yearCheck < 1970 || yearCheck > 2100) {
       return `Format Tidak Valid (${dateString.split(' ')[0]})`;
@@ -103,7 +112,6 @@ const Sprint = ({ projectId, currentRole }) => {
     try {
       const payload = {
         ...formData,
-        // Konversi string kosong status kembali ke default planned/clean jika diperlukan backend
         status: formData.status || 'planned',
         result_review: formData.status === 'completed' ? formData.result_review : null,
         result_retrospective: formData.status === 'completed' ? formData.result_retrospective : null
@@ -185,7 +193,7 @@ const Sprint = ({ projectId, currentRole }) => {
             </p>
           </div>
 
-          {/* Kontrol Pencarian & Tombol Tambah */}
+          {/* Kontrol Pencarian & Tombol Tambah Internal */}
           <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
             <div className="relative w-full sm:max-w-sm">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -388,6 +396,6 @@ const Sprint = ({ projectId, currentRole }) => {
       )}
     </div>
   );
-};
+});
 
 export default Sprint;

@@ -8,7 +8,10 @@ import {
   ChevronRight, 
   ChevronLeft, 
   Layers3,
-  GitMerge // 🌟 BARU: Ikon untuk menu GitHub Integrations
+  GitBranch,      // Ikon untuk integrasi GitHub (Dev, BA, Admin)
+  CreditCard,     // Ikon untuk menu Billing & Penagihan
+  Building,       // Ikon untuk manajemen PT/Workspace (Super Admin)
+  FileSpreadsheet // Ikon untuk manajemen Product Backlog (BA & PO)
 } from 'lucide-react';
 
 const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
@@ -18,38 +21,84 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
     // Ambil role langsung dari localStorage untuk memastikan data sinkron
     const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
     const currentRole = storedUser.role || '';
-    setRole(currentRole.toString().toLowerCase().trim());
+    setRole(currentRole.toString().toLowerCase().trim().replace(/_/g, ''));
   }, []);
 
-  const isRole = (targetRole) => role === targetRole.toLowerCase().trim();
+  const isRole = (targetRole) => role.includes(targetRole.toLowerCase().trim().replace(/_/g, ''));
 
   const menuItems = [
+    // ------------------------------------------------------------------------
+    // MENU GLOBAL (Semua Role Masuk Tapi Halaman Isinya Berbeda)
+    // ------------------------------------------------------------------------
     { 
       name: 'Dashboard', 
       path: '/dashboard', 
       icon: <LayoutDashboard size={20} />, 
       show: true 
     },
+
+    // ------------------------------------------------------------------------
+    // MENU KHUSUS SUPER ADMIN PLATFORM
+    // ------------------------------------------------------------------------
     { 
-      name: 'Proyek', 
+      name: 'Perusahaan SaaS', 
+      path: '/superadmin/companies', 
+      icon: <Building size={20} />, 
+      show: isRole('superadmin') 
+    },
+    { 
+      name: 'Billing Platform', 
+      path: '/superadmin/billing-tracker', 
+      icon: <CreditCard size={20} />, 
+      show: isRole('superadmin') 
+    },
+
+    // ------------------------------------------------------------------------
+    // MENU ADMIN PT / WORKSPACE
+    // ------------------------------------------------------------------------
+    { 
+      name: 'Kelola Karyawan', 
+      path: '/workspace/users', 
+      icon: <Users size={20} />, 
+      show: isRole('admin') 
+    },
+    { 
+      name: 'Workspace Billing', 
+      path: '/billing', 
+      icon: <CreditCard size={20} />, 
+      show: isRole('admin') 
+    },
+
+    // ------------------------------------------------------------------------
+    // MENU OPERASIONAL SCRUM (PO, BA, DEVELOPER)
+    // ------------------------------------------------------------------------
+    { 
+      name: 'Project Space', 
       path: '/projects', 
       icon: <Briefcase size={20} />, 
-      show: true 
+      // Sembunyikan dari Super Admin karena fokusnya hanya bisnis SaaS global
+      show: !isRole('superadmin') 
     },
     { 
-      name: 'Pengguna', 
-      path: '/users', 
-      icon: <Users size={20} />, 
-      // Muncul HANYA jika role adalah superadmin
-      show: isRole('superadmin') 
+      name: 'Product Backlog', 
+      path: '/backlog', 
+      icon: <FileSpreadsheet size={20} />, 
+      show: isRole('projectowner') || isRole('analyst')
     },
+    
+    // 🗑️ MENU KANBAN BOARD TELAH DIHAPUS DARI SINI KARENA PINDAH KE DETAIL PROYEK
+
     { 
-      name: 'GitHub Integrations', // 🌟 BARU: Menu Integrasi GitHub Center
+      name: 'GitHub Integrations', 
       path: '/github-integrations', 
-      icon: <GitMerge size={20} />, 
-      // Muncul HANYA jika role adalah superadmin
-      show: isRole('superadmin') 
+      icon: <GitBranch size={20} />, 
+      // Muncul untuk Admin Workspace (Setting), BA, dan Developer (Operasional)
+      show: isRole('admin') || isRole('analyst') || isRole('developer')
     },
+
+    // ------------------------------------------------------------------------
+    // MENU UMUM / INFORMASI
+    // ------------------------------------------------------------------------
     { 
       name: 'Informasi', 
       path: '/info', 
@@ -78,7 +127,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
       </div>
 
       {/* NAV MENU */}
-      <nav className={`flex-1 pt-6 space-y-2 ${isCollapsed ? 'px-2' : 'px-4'}`}>
+      <nav className={`flex-1 pt-6 space-y-2 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-4'}`}>
         {menuItems.filter(item => item.show).map((item) => (
           <NavLink
             key={item.name}

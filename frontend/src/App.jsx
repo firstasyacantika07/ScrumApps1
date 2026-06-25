@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-
 import {
   BrowserRouter as Router,
   Routes,
@@ -10,13 +9,14 @@ import {
 import { GoogleOAuthProvider } from '@react-oauth/google';
 
 // ======================================================
-// PUBLIC PAGES (Halaman yang bisa diakses tanpa login)
+// PUBLIC PAGES
 // ======================================================
 import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
+import AcceptInvite from './pages/Acceptinvite'; // 💡 Dipindah atau dipastikan ter-import
 
 // ======================================================
-// PROTECTED PAGES (Halaman internal - Wajib Login)
+// PROTECTED PAGES
 // ======================================================
 import Dashboard from './pages/Dashboard';
 import ProjectList from './pages/ProjectList';
@@ -26,45 +26,27 @@ import Info from './pages/Info';
 import KelolaProfil from './pages/KelolaProfil';
 import Billing from './pages/Billing';
 import Payment from './pages/Payment';
-
-// 🌟 BARU: Halaman Pengelolaan Integrasi GitHub Khusus Super Admin
+import Companies from './pages/SuperAdmin/Companies'; 
+import BillingTracker from './pages/SuperAdmin/BillingTracker';
 import GitHubIntegrations from './pages/SuperAdmin/GitHubIntegrations';
 
 // ======================================================
-// LAYOUT
+// LAYOUT & AUTH CONTEXT / GUARD
 // ======================================================
 import MainLayout from './layouts/MainLayout';
+import ProtectedRoute from './components/ProtectedRoutes';
 
 // ======================================================
-// 🔐 PROTECTED ROUTE GUARD (Satpam Utama Aplikasi)
-// Aturan wajib login diatur di sini. Jika user tidak ada,
-// browser otomatis dipaksa kembali ke halaman /login.
+// 🛡️ FLEXIBLE ROLE BASED ROUTE GUARD
 // ======================================================
-const ProtectedRoute = ({ children, user }) => {
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return children;
-};
-
-// ======================================================
-// 🛡️ ROLE BASED ROUTE GUARD (Pembatasan Hak Akses Admin)
-// Mencegah user non-admin masuk ke halaman manajemen organisasi global.
-// ======================================================
-const AdminRoute = ({ children, userRole }) => {
-  if (userRole !== 'superadmin') {
+const AllowedRolesRoute = ({ children, userRole, allowedRoles = [] }) => {
+  if (!allowedRoles.includes(userRole)) {
     return <Navigate to="/dashboard" replace />;
   }
-
   return children;
 };
 
 function App() {
-  // ======================================================
-  // USER STATE (Membaca data login dari LocalStorage)
-  // Termasuk role, tenant_id, dan plan_id untuk isolasi data
-  // ======================================================
   const [user, setUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem('user'));
@@ -73,14 +55,10 @@ function App() {
     }
   });
 
-  // ======================================================
-  // MONITOR LOGIN / LOGOUT / BILLING STATUS (Sinkronisasi State)
-  // ======================================================
   useEffect(() => {
     const syncUser = () => {
       try {
         const storedUser = localStorage.getItem('user');
-
         if (storedUser) {
           setUser(JSON.parse(storedUser));
         } else {
@@ -92,10 +70,7 @@ function App() {
       }
     };
 
-    // Sinkronisasi jika user membuka aplikasi di banyak tab sekaligus
     window.addEventListener('storage', syncUser);
-
-    // Polling berkala setiap 1 detik untuk mendeteksi perubahan login & paket secara realtime
     const interval = setInterval(syncUser, 1000);
 
     return () => {
@@ -104,9 +79,7 @@ function App() {
     };
   }, []);
 
-  // ======================================================
-  // NORMALIZE ROLE (Format teks role agar seragam)
-  // ======================================================
+  // Normalisasi string role (contoh: 'superadmin', 'admin')
   const userRole =
     user?.role
       ?.toString()
@@ -124,123 +97,99 @@ function App() {
         <Routes>
 
           {/* ====================================================== */}
-          {/* PUBLIC ROUTES & AUTO REDIRECT LOGIC                    */}
+          {/* PUBLIC ROUTES                                          */}
           {/* ====================================================== */}
-          
-          {/* Jalur Utama '/' : Jika sudah login ke dashboard, jika belum ke login */}
           <Route
             path="/"
-            element={
-              <Navigate
-                to={user ? '/dashboard' : '/login'}
-                replace
-              />
-            }
+            element={<Navigate to={user ? '/dashboard' : '/login'} replace />}
           />
 
-          {/* Jalur '/login' : Jika sudah login, tidak boleh masuk halaman login lagi */}
           <Route
             path="/login"
-            element={
-              user
-                ? <Navigate to="/dashboard" replace />
-                : <Login />
-            }
+            element={user ? <Navigate to="/dashboard" replace /> : <Login />}
           />
 
-          <Route
-            path="/forgot-password"
-            element={<ForgotPassword />}
-          />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          
+          {/* ✉️ ACCEPT INVITE (Public/Semi-Public): 
+              Ditaruh di luar MainLayout agar user tidak melihat sidebar aplikasi saat mengisi form register/invite */}
+          <Route path="/accept-invite" element={<AcceptInvite />} />
 
           {/* ====================================================== */}
-          {/* PROTECTED ROUTES (Dibungkus oleh ProtectedRoute)       */}
+          {/* PROTECTED ROUTES (Wajib Login & Ber-Sidebar)          */}
           {/* ====================================================== */}
           <Route
             element={
-              <ProtectedRoute user={user}>
-                {/* Melempar data user ke layout agar sidebar/navbar bisa mendeteksi tenant & plan */}
+              <ProtectedRoute>
                 <MainLayout userData={user} />
               </ProtectedRoute>
             }
           >
+            {/* AMAN UNTUK SEMUA ROLE (Karyawan, PO, BA, Admin, Superadmin) */}
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/projects" element={<ProjectList />} />
+            <Route path="/projects/:id/*" element={<ProjectDetail />} />
+            <Route path="/info" element={<Info />} />
+            <Route path="/kelolaprofil" element={<KelolaProfil />} />
+            <Route path="/payment" element={<Payment />} />
 
-            {/* DASHBOARD */}
-            <Route
-              path="/dashboard"
-              element={<Dashboard />}
-            />
-
-            {/* PROJECTS */}
-            <Route
-              path="/projects"
-              element={<ProjectList />}
-            />
-
-            <Route
-              path="/projects/:id/*"
-              element={<ProjectDetail />}
-            />
-
-            {/* BILLING & SUBSCRIPTION (Khusus Pembelian Paket oleh Admin) */}
+            {/* WORKSPACE BILLING (Bisa diakses Superadmin & Admin Workspace PT) */}
             <Route
               path="/billing"
-              element={<Billing />}
+              element={
+                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin', 'admin']}>
+                  <Billing />
+                </AllowedRolesRoute>
+              }
             />
 
-            {/* PAYMENT */}
-            <Route
-              path="/payment"
-              element={<Payment />}
-            />
-
-            {/* INFO */}
-            <Route
-              path="/info"
-              element={<Info />}
-            />
-
-            {/* PROFILE MANAGEMENT */}
-            <Route
-              path="/kelolaprofil"
-              element={<KelolaProfil />}
-            />
-
-            {/* USERS - KHUSUS SUPERADMIN ONLY */}
+            {/* KELOLA KARYAWAN / USERS (Bisa diakses Superadmin & Admin Workspace PT) */}
             <Route
               path="/users"
               element={
-                <AdminRoute userRole={userRole}>
+                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin', 'admin']}>
                   <Users />
-                </AdminRoute>
+                </AllowedRolesRoute>
               }
             />
 
-            {/* 🌟 GITHUB INTEGRATIONS - MUTLAK KHUSUS SUPERADMIN ONLY 
-                Business Analyst (BA) tidak diizinkan mengakses jalur ini */}
+            {/* ====================================================== */}
+            {/* KHUSUS MUTLAK SUPERADMIN ONLY (Platform Tenant Global) */}
+            {/* ====================================================== */}
+            
+            {/* 🏢 COMPANIES (Perusahaan SaaS) */}
+            <Route
+              path="/companies"
+              element={
+                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin']}>
+                  <Companies />
+                </AllowedRolesRoute>
+              }
+            />
+
+            {/* 💳 BILLING TRACKER (Billing Platform Global) */}
+            <Route
+              path="/billing-tracker"
+              element={
+                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin']}>
+                  <BillingTracker />
+                </AllowedRolesRoute>
+              }
+            />
+
+            {/* 🛠️ GITHUB INTEGRATIONS */}
             <Route
               path="/github-integrations"
               element={
-                <AdminRoute userRole={userRole}>
+                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin']}>
                   <GitHubIntegrations />
-                </AdminRoute>
+                </AllowedRolesRoute>
               }
             />
-
           </Route>
 
-          {/* ====================================================== */}
-          {/* 404 FALLBACK HANDLER (Proteksi URL Acak)               */}
-          {/* ====================================================== */}
-          <Route
-            path="*"
-            element={
-              <Navigate
-                to={user ? '/dashboard' : '/login'}
-                replace
-              />
-            }
-          />
+          {/* FALLBACK */}
+          <Route path="*" element={<Navigate to={user ? '/dashboard' : '/login'} replace />} />
 
         </Routes>
       </Router>
