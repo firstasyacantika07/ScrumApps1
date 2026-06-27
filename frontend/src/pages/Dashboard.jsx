@@ -344,7 +344,7 @@ const AdminWorkspaceView = ({ workspaceStats, recentProjects, navigate }) => {
 const ProjectOwnerView = ({ scrumStats, recentProjects, navigate }) => {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-      <div className="lg:col-span-4 flex flex-col gap-6">
+      <div className="lg:col-span-8 flex flex-col gap-6">
         <div className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem]">
           <ShieldAlert className="text-amber-600 mb-2" size={20} />
           <h4 className="text-xs font-black text-amber-800 uppercase">Mode Pemantauan Aktif (Read-Only)</h4>
@@ -361,33 +361,31 @@ const ProjectOwnerView = ({ scrumStats, recentProjects, navigate }) => {
         </button>
       </div>
 
-      <div className="lg:col-span-8 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-between">
-        <div>
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-[#ee1e2d] pl-4 mb-6">Status Distribusi Kerja Proyek</h3>
-          <div className="w-full h-[280px]">
-            {scrumStats.total_backlogs > 0 ? (
-              <ResponsiveContainer width="100%" height={"100%"}>
-                <BarChart data={[
-                  { name: 'Hold', qty: scrumStats.hold },
-                  { name: 'In Progress', qty: scrumStats.progress },
-                  { name: 'Done', qty: scrumStats.done },
-                  { name: 'Overdue', qty: scrumStats.late },
-                ]}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} />
-                  <YAxis stroke="#94a3b8" fontSize={10} allowDecimals={false} />
-                  <Tooltip />
-                  <Bar dataKey="qty" name="Jumlah Task" fill="#ee1e2d" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-xs font-bold text-slate-400 uppercase tracking-wider">Tidak ada data sprint aktif</div>
-            )}
-          </div>
+      <div className="lg:col-span-4 bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col gap-4">
+        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-[#ee1e2d] pl-4">Status Distribusi Kerja Proyek</h3>
+        <div className="w-full h-[180px]">
+          {scrumStats.total_backlogs > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={[
+                { name: 'Hold', qty: scrumStats.hold },
+                { name: 'In Progress', qty: scrumStats.progress },
+                { name: 'Done', qty: scrumStats.done },
+                { name: 'Overdue', qty: scrumStats.late },
+              ]} margin={{ top: 5, right: 10, left: -20, bottom: 15 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={9} tick={{ fontSize: 9 }} tickMargin={8} />
+                <YAxis stroke="#94a3b8" fontSize={9} allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="qty" name="Jumlah Task" fill="#ee1e2d" radius={[4, 4, 0, 0]} maxBarSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-xs font-bold text-slate-400 uppercase tracking-wider">Tidak ada data sprint aktif</div>
+          )}
         </div>
-        <div className="mt-4 p-4 bg-slate-50 rounded-2xl flex items-center justify-between text-xs font-bold text-slate-500">
-          <span>Sprint Aktif saat ini dikelola sepenuhnya oleh Business Analyst.</span>
-          <button onClick={() => navigate('/kanban')} className="text-[#ee1e2d] font-black uppercase tracking-wider flex items-center gap-1 text-[11px]">Pantau Kanban Board <ChevronRight size={14} /></button>
+        <div className="p-3 bg-slate-50 rounded-2xl flex flex-col gap-2 text-[10px] font-bold text-slate-500">
+          <span>Sprint Aktif dikelola oleh Business Analyst.</span>
+          <button onClick={() => navigate('/kanban')} className="text-[#ee1e2d] font-black uppercase tracking-wider flex items-center gap-1">Pantau Kanban Board <ChevronRight size={12} /></button>
         </div>
       </div>
     </div>
