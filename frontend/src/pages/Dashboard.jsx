@@ -411,7 +411,7 @@ const BusinessAnalystView = ({ scrumStats, recentProjects, navigate }) => {
         <div className="lg:col-span-7 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-blue-600 pl-4">Manajemen Siklus Kerja</h3>
-            <button onClick={() => navigate('/backlog/new')} className="text-xs font-black text-[#ee1e2d] uppercase tracking-wider flex items-center gap-1"><Plus size={14}/> Tambah Backlog</button>
+            <button onClick={() => navigate('/backlog')} className="text-xs font-black text-[#ee1e2d] uppercase tracking-wider flex items-center gap-1"><Plus size={14}/> Tambah Backlog</button>
           </div>
 
           {scrumStats.current_sprint ? (
@@ -422,14 +422,14 @@ const BusinessAnalystView = ({ scrumStats, recentProjects, navigate }) => {
                 <p className="text-[11px] font-bold text-slate-400 mt-1 flex items-center gap-1"><Clock size={12}/> Berakhir tanggal: {scrumStats.current_sprint.end_date}</p>
               </div>
               <div className="flex gap-3 mt-6">
-                <button className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-slate-800 transition-colors">Tutup Sprint (End Sprint)</button>
+                <button onClick={() => navigate(`/projects/${scrumStats.current_sprint.project_id || ''}`)} className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-slate-800 transition-colors">Tutup Sprint (End Sprint)</button>
               </div>
             </div>
           ) : (
             <div className="p-6 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200 text-center flex flex-col items-center justify-center min-h-[180px]">
               <Play className="text-slate-300 mb-2" size={24} />
               <p className="text-xs font-black text-slate-600">Tidak ada Sprint yang aktif</p>
-              <button className="mt-4 px-5 py-2.5 bg-[#ee1e2d] text-white rounded-xl text-[10px] font-black uppercase tracking-widest">Buat & Mulai Sprint Baru</button>
+              <button onClick={() => navigate('/projects')} className="mt-4 px-5 py-2.5 bg-[#ee1e2d] text-white rounded-xl text-[10px] font-black uppercase tracking-widest">Buat & Mulai Sprint Baru</button>
             </div>
           )}
         </div>
@@ -448,7 +448,7 @@ const BusinessAnalystView = ({ scrumStats, recentProjects, navigate }) => {
               </div>
             </div>
           </div>
-          <button onClick={() => navigate('/reports/export')} className="w-full py-3.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-blue-700 transition-colors mt-6">
+          <button onClick={() => navigate('/backlog')} className="w-full py-3.5 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-blue-700 transition-colors mt-6">
             Cetak Dokumen Spesifikasi PDF
           </button>
         </div>
@@ -511,7 +511,8 @@ const DeveloperView = ({ scrumStats, recentProjects, navigate }) => {
               </div>
             </div>
           </div>
-          <button onClick={() => navigate('/settings/integrations')} className="w-full mt-6 py-3 border border-slate-200 rounded-xl text-[10px] font-black uppercase text-slate-700 tracking-wider hover:bg-slate-50 transition-colors">
+          {/* ✅ FIX: Arahkan ke halaman GitHub Integrations yang sudah ada */}
+          <button onClick={() => navigate('/github-integrations')} className="w-full mt-6 py-3 border border-slate-200 rounded-xl text-[10px] font-black uppercase text-slate-700 tracking-wider hover:bg-slate-50 transition-colors">
             Konfigurasi Webhook Repository
           </button>
         </div>

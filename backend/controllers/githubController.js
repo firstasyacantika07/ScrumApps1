@@ -29,7 +29,6 @@ const getIntegrationByProject = async (req, res, next) => {
             return res.status(400).json({ success: false, message: 'ID Proyek tidak valid' });
         }
 
-        // 🔥 REVISI MULTI-TENANT: Validasi kepemilikan proyek berdasarkan tenant_id agar data tidak bocor
         const [projectCheck] = await db.query('SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?', [projectId, tenantId]);
         if (projectCheck.length === 0) {
             return res.status(403).json({ success: false, message: 'Akses Ditolak: Proyek tidak berada di workspace Anda.' });
@@ -60,10 +59,8 @@ const createIntegrationRequest = async (req, res, next) => {
         let { github_owner, github_repo } = req.body;
         const tenantId = req.user.tenant_id;
 
-        // 🔥 BINDING SAAS SECURITY: Tolak langsung jika paketnya masih FREE
         if (!checkGitHubPackagePermission(req, res)) return;
 
-        // Validasi Tenant Proyek
         const [projectCheck] = await db.query('SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?', [projectId, tenantId]);
         if (projectCheck.length === 0) {
             return res.status(403).json({ success: false, message: 'Akses ilegal di luar workspace ditolak.' });
@@ -118,6 +115,7 @@ const createIntegrationRequest = async (req, res, next) => {
 /**
  * 3. Mengambil URL OAuth GitHub untuk proses otentikasi (Superadmin Platform)
  * GET /api/projects/github/oauth-url
+ * FIX: Hapus double encodeURIComponent — dipanggil 1x saat dimasukkan ke URL
  */
 const getGitHubOAuthUrl = async (req, res, next) => {
     try {
@@ -127,8 +125,15 @@ const getGitHubOAuthUrl = async (req, res, next) => {
         }
 
         const client_id = process.env.GITHUB_CLIENT_ID;
-        const redirect_uri = encodeURIComponent(process.env.GITHUB_REDIRECT_URI);
-        const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&state=${request_id}&scope=repo%20admin:repo_hook`;
+        const redirect_uri = process.env.GITHUB_CALLBACK_URL; // ambil RAW dulu
+
+        if (!client_id || !redirect_uri) {
+            console.error('ENV MISSING: GITHUB_CLIENT_ID atau GITHUB_CALLBACK_URL belum diset di .env');
+            return res.status(500).json({ success: false, message: 'Konfigurasi OAuth GitHub belum lengkap di server.' });
+        }
+
+        // encodeURIComponent dipanggil 1x saat dimasukkan ke query string
+        const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}&state=${request_id}&scope=repo%20admin:repo_hook`;
 
         return res.status(200).json({ url: githubAuthUrl });
     } catch (error) {
@@ -143,21 +148,47 @@ const getGitHubOAuthUrl = async (req, res, next) => {
  */
 const getAllIntegrationRequests = async (req, res, next) => {
     try {
-        const query = `
-            SELECT 
-                gi.id, 
-                gi.project_id, 
-                p.name AS project_name, 
-                gi.requester_name, 
-                gi.github_owner AS repository_owner, 
-                gi.github_repo AS repository_name, 
-                gi.repository_url, 
-                gi.status 
-            FROM tbr_github_integrations gi
-            JOIN tbr_projects p ON gi.project_id = p.id
-            ORDER BY gi.created_at DESC
-        `;
-        const [rows] = await db.query(query);
+        const userRole = req.user?.role;
+        const tenantId = req.user?.tenant_id;
+
+        let query;
+        let params = [];
+
+        if (userRole === 'superadmin' || userRole === 'super_admin') {
+            query = `
+                SELECT 
+                    gi.id, 
+                    gi.project_id, 
+                    p.name AS project_name, 
+                    gi.requester_name, 
+                    gi.github_owner AS repository_owner, 
+                    gi.github_repo AS repository_name, 
+                    gi.repository_url, 
+                    gi.status 
+                FROM tbr_github_integrations gi
+                JOIN tbr_projects p ON gi.project_id = p.id
+                ORDER BY gi.created_at DESC
+            `;
+        } else {
+            query = `
+                SELECT 
+                    gi.id, 
+                    gi.project_id, 
+                    p.name AS project_name, 
+                    gi.requester_name, 
+                    gi.github_owner AS repository_owner, 
+                    gi.github_repo AS repository_name, 
+                    gi.repository_url, 
+                    gi.status 
+                FROM tbr_github_integrations gi
+                JOIN tbr_projects p ON gi.project_id = p.id
+                WHERE p.tenant_id = ?
+                ORDER BY gi.created_at DESC
+            `;
+            params = [tenantId];
+        }
+
+        const [rows] = await db.query(query, params);
         return res.status(200).json(rows);
     } catch (error) {
         console.error('🔥 Error di getAllIntegrationRequests:', error.message);
@@ -189,6 +220,44 @@ const rejectIntegrationRequest = async (req, res, next) => {
 };
 
 /**
+ * 5b. TAMBAHAN: Menyetujui pengajuan & generate OAuth URL (Superadmin Platform Pusat)
+ * PUT /api/projects/github/requests/:id/approve
+ * FIX: Fungsi ini sebelumnya tidak ada — menyebabkan error "Gagal menyetujui pengajuan"
+ */
+const approveIntegrationRequest = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const [result] = await db.query(
+            'UPDATE tbr_github_integrations SET status = "Approved" WHERE id = ?',
+            [id]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ success: false, message: 'Data pengajuan tidak ditemukan.' });
+        }
+
+        const client_id    = process.env.GITHUB_CLIENT_ID;
+        const redirect_uri = process.env.GITHUB_CALLBACK_URL;
+
+        if (!client_id || !redirect_uri) {
+            return res.status(500).json({ success: false, message: 'Konfigurasi OAuth GitHub belum lengkap di server.' });
+        }
+
+        const oauthUrl = `https://github.com/login/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}&state=${id}&scope=repo%20admin:repo_hook`;
+
+        return res.status(200).json({ 
+            success: true, 
+            message: 'Pengajuan disetujui. Arahkan user ke URL OAuth berikut.',
+            oauth_url: oauthUrl 
+        });
+    } catch (error) {
+        console.error('🔥 Error di approveIntegrationRequest:', error.message);
+        return res.status(500).json({ success: false, message: 'Internal Server Error' });
+    }
+};
+
+/**
  * 6. Memutuskan hubungan repositori dengan proyek / Disconnect (Superadmin Platform)
  * DELETE /api/projects/github/integrations/:id
  */
@@ -214,7 +283,6 @@ const disconnectGitHub = async (req, res, next) => {
         );
 
         try {
-            // 🔥 REVISI: Mengubah ke tabel audit log global yang valid (tbr_activity_logs)
             await db.query(
                 'INSERT INTO tbr_activity_logs (project_id, activity, user_id, created_at) VALUES (?, ?, ?, NOW())',
                 [projectId, `Memutuskan koneksi repositori GitHub (${repoName}) dari proyek.`, req.user.id]
@@ -232,6 +300,7 @@ const disconnectGitHub = async (req, res, next) => {
 /**
  * 7. Callback Handler dari GitHub OAuth 
  * GET /api/projects/github/callback
+ * FIX: Redirect ke FRONTEND_URL env, bukan hardcoded localhost
  */
 const handleGitHubCallback = async (req, res, next) => {
     try {
@@ -244,10 +313,10 @@ const handleGitHubCallback = async (req, res, next) => {
         const tokenResponse = await axios.post(
             'https://github.com/login/oauth/access_token',
             {
-                client_id: process.env.GITHUB_CLIENT_ID,
+                client_id:    process.env.GITHUB_CLIENT_ID,
                 client_secret: process.env.GITHUB_CLIENT_SECRET,
-                code: code,
-                redirect_uri: process.env.GITHUB_REDIRECT_URI
+                code:         code,
+                redirect_uri: process.env.GITHUB_CALLBACK_URL
             },
             { headers: { Accept: 'application/json' } }
         );
@@ -255,7 +324,8 @@ const handleGitHubCallback = async (req, res, next) => {
         const accessToken = tokenResponse.data.access_token;
 
         if (!accessToken) {
-            return res.status(400).send('Gagal mendapatkan access token dari otoritas GitHub.');
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+            return res.redirect(`${frontendUrl}/github-integrations?error=token_failed`);
         }
 
         const [result] = await db.query(
@@ -264,13 +334,17 @@ const handleGitHubCallback = async (req, res, next) => {
         );
 
         if (result.affectedRows === 0) {
-            return res.status(404).send('Data referensi pengajuan integrasi tidak ditemukan di database.');
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+            return res.redirect(`${frontendUrl}/github-integrations?error=request_not_found`);
         }
 
-        return res.redirect('http://localhost:5173/superadmin/github-integrations?success=true');
+        // FIX: Gunakan FRONTEND_URL dari env, bukan hardcoded localhost
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        return res.redirect(`${frontendUrl}/github-integrations?success=connected`);
 
     } catch (error) {
-        return res.status(500).send(`Terjadi kegagalan sistem internal: ${error.message}`);
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        return res.redirect(`${frontendUrl}/github-integrations?error=server_error`);
     }
 };
 
@@ -283,10 +357,8 @@ const getRepoActivity = async (req, res, next) => {
         const { projectId } = req.params;
         const tenantId = req.user.tenant_id;
 
-        // 🔥 BINDING SAAS SECURITY
-        if (!checkGitHubPermission(req, res)) return;
+        if (!checkGitHubPackagePermission(req, res)) return;
 
-        // Validasi Tenant Proyek
         const [projectCheck] = await db.query('SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?', [projectId, tenantId]);
         if (projectCheck.length === 0) {
             return res.status(403).json({ success: false, message: 'Proyek di luar lingkup organisasi Anda.' });
@@ -338,7 +410,6 @@ const syncBacklogWithGitHub = async (req, res, next) => {
         const { projectId } = req.params;
         const tenantId = req.user.tenant_id;
 
-        // 🔥 BINDING SAAS SECURITY
         if (!checkGitHubPackagePermission(req, res)) return;
 
         const [projectCheck] = await db.query('SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?', [projectId, tenantId]);
@@ -355,7 +426,6 @@ const syncBacklogWithGitHub = async (req, res, next) => {
 
         const { github_owner, github_repo, access_token } = integrations[0];
         
-        // 🔥 FIX SINKRONISASI: Mengubah 'title' menjadi kolom skema tabel asli Anda yaitu 'name'
         const [backlogs] = await db.query('SELECT id, name, description FROM tbr_backlogs WHERE project_id = ?', [projectId]);
 
         for (const backlog of backlogs) {
@@ -515,13 +585,11 @@ const linkGitActionToKanban = async (req, res, next) => {
             return res.status(200).json({ success: true, message: 'Webhook received but no action required.' });
         }
 
-        // Ekspresi Regex mendeteksi tag manual '[Task-ID]' di pesan git commit
         const match = commitMessage.match(/\[Task-(\d+)\]/i);
 
         if (match) {
             const taskId = match[1];
             
-            // Otomatis menggeser kartu Kanban manual pengerjaan developer ke kolom DONE
             const [updateResult] = await db.query(
                 "UPDATE tbr_developments SET status = 'DONE', updated_at = NOW() WHERE id = ?", 
                 [taskId]
@@ -545,6 +613,7 @@ module.exports = {
     getGitHubOAuthUrl,
     getAllIntegrationRequests,
     rejectIntegrationRequest,
+    approveIntegrationRequest, // TAMBAHAN BARU
     disconnectGitHub,
     handleGitHubCallback,
     getRepoActivity,

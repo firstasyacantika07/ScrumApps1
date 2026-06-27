@@ -40,14 +40,13 @@ app.use(morgan('dev'));
 ========================================================= */
 
 const authRoutes = require('./routes/authRoutes');
-const projectRoutes = require('./routes/projectRoutes'); // 💡 Di dalam sini sudah mencakup fitur integrasi GitHub
+const projectRoutes = require('./routes/projectRoutes'); 
 const userRoutes = require('./routes/userRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const superadminRoutes = require('./routes/superadminRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
-
 // Import tambahan untuk keperluan bypass controller & middleware
 const paymentController = require('./controllers/paymentController');
 const { verifyToken } = require('./middleware/auth');
@@ -58,17 +57,18 @@ const { verifyToken } = require('./middleware/auth');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/projects', projectRoutes); // 🛠️ Menangani core proyek, backlog, sprint, logs, & status GitHub
+// projectRoutes sudah mencakup semua route /github/* via githubController
+// githubRoutes terpisah DIHAPUS karena menyebabkan bentrok dengan projectRoutes
+app.use('/api/projects', projectRoutes);
+
 app.use('/api/dashboard', verifyToken, dashboardRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/subscription', subscriptionRoutes);
 
-// 💡 BYPASS STRATEGY: Rute ini didaftarkan langsung ke core Express
-// Ini memastikan rute Anda 100% TIDAK AKAN terkena 404 lagi akibat salah struktur file router
+// 💡 BYPASS STRATEGY
 app.post('/api/payment/create-transaction', verifyToken, paymentController.createPayment);
 
-// Sisa rute payment lainnya tetap dialirkan ke file router utama
 app.use('/api/payment', paymentRoutes);
 
 /* =========================================================

@@ -83,7 +83,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
       name: 'Product Backlog', 
       path: '/backlog', 
       icon: <FileSpreadsheet size={20} />, 
-      show: isRole('projectowner') || isRole('analyst')
+      show: isRole('projectowner') || isRole('productowner') || isRole('analyst')
     },
     
     // 🗑️ MENU KANBAN BOARD TELAH DIHAPUS DARI SINI KARENA PINDAH KE DETAIL PROYEK

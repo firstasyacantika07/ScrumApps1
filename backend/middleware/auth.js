@@ -97,7 +97,13 @@ const verifyToken = async (req, res, next) => {
 
     // ✨ REVISI SINKRONISASI: Standardisasi string role (lowercase, tanpa spasi)
     // Ini krusial agar konsisten di frontend dan backend controller lainnya.
-    const cleanRole = user.role ? String(user.role).replace(/\s+/g, '').toLowerCase().trim() : '';
+    // 🔥 FIX: Normalisasi role — hapus spasi & underscore, lowercase
+    // Contoh: "Business Analyst" → "businessanalyst"
+    //         "business_analyst" → "businessanalyst"  
+    //         "TeamDeveloper"    → "teamdeveloper"
+    const cleanRole = user.role 
+        ? String(user.role).replace(/[\s_]+/g, '').toLowerCase().trim() 
+        : '';
 
     // 6. Menyimpan data user & status billing ke objek request (req.user)
     req.user = {

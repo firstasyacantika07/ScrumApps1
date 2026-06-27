@@ -3,8 +3,14 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const ProtectedRoute = ({ children, requiredPackage }) => {
-    const { user, isSubscriptionActive, packageType } = useAuth();
+    // Menggunakan 'loading' agar sinkron dengan AuthContext.jsx
+    const { user, packageType, loading } = useAuth();
     const location = useLocation();
+
+    // Menangani state loading agar tidak muncul blank screen
+    if (loading) {
+        return <div>Loading...</div>; 
+    }
 
     // 1. Jika belum login, tendang ke halaman login
     if (!user) {

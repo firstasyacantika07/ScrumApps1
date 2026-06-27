@@ -10,6 +10,7 @@ const resetAll = async () => {
     { email: 'projectowner@gmail.com',  password: 'scrumapps123' },
     { email: 'firstasya@gmail.com',     password: 'scrumapps123' },
     { email: 'hanisetya@gmail.com',    password: 'scrumapps123' },
+    { email: 'tika@gmail.com',          password: 'scrumapps123'  }
   ];
 
   for (const u of users) {

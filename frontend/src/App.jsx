@@ -13,7 +13,7 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 // ======================================================
 import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
-import AcceptInvite from './pages/Acceptinvite'; // 💡 Dipindah atau dipastikan ter-import
+import AcceptInvite from './pages/Acceptinvite';
 
 // ======================================================
 // PROTECTED PAGES
@@ -29,6 +29,7 @@ import Payment from './pages/Payment';
 import Companies from './pages/SuperAdmin/Companies'; 
 import BillingTracker from './pages/SuperAdmin/BillingTracker';
 import GitHubIntegrations from './pages/SuperAdmin/GitHubIntegrations';
+import BacklogPage from './pages/Backlogpage';
 
 // ======================================================
 // LAYOUT & AUTH CONTEXT / GUARD
@@ -36,163 +37,158 @@ import GitHubIntegrations from './pages/SuperAdmin/GitHubIntegrations';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoutes';
 
+// ✅ FIX: Import AuthProvider agar AuthContext tersedia di seluruh app
+import { AuthProvider, useAuth } from './context/AuthContext';
+
 // ======================================================
 // 🛡️ FLEXIBLE ROLE BASED ROUTE GUARD
+// ✅ FIX: Ambil userRole dari AuthContext, bukan dari prop
 // ======================================================
-const AllowedRolesRoute = ({ children, userRole, allowedRoles = [] }) => {
+const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
+  const { user } = useAuth();
+  const userRole = user?.role?.toString().toLowerCase().replace(/\s+/g, '') || '';
+
   if (!allowedRoles.includes(userRole)) {
     return <Navigate to="/dashboard" replace />;
   }
   return children;
 };
 
-function App() {
-  const [user, setUser] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('user'));
-    } catch {
-      return null;
-    }
-  });
+// ======================================================
+// ✅ FIX: Pisahkan Routes ke komponen sendiri agar bisa
+// menggunakan useAuth() di dalam AuthProvider
+// ======================================================
+function AppRoutes() {
+  // ✅ FIX: Hapus useState & setInterval — ambil user dari AuthContext saja
+  // setInterval setiap 1 detik adalah penyebab "Maximum update depth exceeded"
+  const { user, loading } = useAuth();
 
-  useEffect(() => {
-    const syncUser = () => {
-      try {
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
-        } else {
-          setUser(null);
+  const userRole = user?.role?.toString().toLowerCase().replace(/\s+/g, '') || '';
+
+  // Tunggu AuthContext selesai init, cegah blank screen saat refresh
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex', justifyContent: 'center',
+        alignItems: 'center', height: '100vh'
+      }}>
+        <span>Memuat...</span>
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      {/* PUBLIC ROUTES */}
+      <Route
+        path="/"
+        element={<Navigate to={user ? '/dashboard' : '/login'} replace />}
+      />
+      <Route
+        path="/login"
+        element={user ? <Navigate to="/dashboard" replace /> : <Login />}
+      />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/accept-invite" element={<AcceptInvite />} />
+
+      {/* PROTECTED ROUTES */}
+      {/* ✅ FIX: MainLayout tidak perlu userData prop lagi, ambil sendiri via useAuth() */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <MainLayout />
+          </ProtectedRoute>
         }
-      } catch (error) {
-        console.error('Failed parse user:', error);
-        setUser(null);
-      }
-    };
+      >
+        {/* AMAN UNTUK SEMUA ROLE */}
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/projects" element={<ProjectList />} />
+        <Route path="/projects/:id/*" element={<ProjectDetail />} />
+        <Route path="/info" element={<Info />} />
+        <Route path="/kelolaprofil" element={<KelolaProfil />} />
+        <Route path="/payment" element={<Payment />} />
 
-    window.addEventListener('storage', syncUser);
-    const interval = setInterval(syncUser, 1000);
+        {/* WORKSPACE BILLING */}
+        <Route
+          path="/billing"
+          element={
+            <AllowedRolesRoute allowedRoles={['superadmin', 'admin']}>
+              <Billing />
+            </AllowedRolesRoute>
+          }
+        />
 
-    return () => {
-      window.removeEventListener('storage', syncUser);
-      clearInterval(interval);
-    };
-  }, []);
+        {/* KELOLA KARYAWAN */}
+        <Route
+          path="/users"
+          element={
+            <AllowedRolesRoute allowedRoles={['superadmin', 'admin']}>
+              <Users />
+            </AllowedRolesRoute>
+          }
+        />
 
-  // Normalisasi string role (contoh: 'superadmin', 'admin')
-  const userRole =
-    user?.role
-      ?.toString()
-      .toLowerCase()
-      .replace(/\s+/g, '') || '';
+        {/* 🏢 COMPANIES */}
+        <Route
+          path="/companies"
+          element={
+            <AllowedRolesRoute allowedRoles={['superadmin']}>
+              <Companies />
+            </AllowedRolesRoute>
+          }
+        />
 
+        {/* 💳 BILLING TRACKER */}
+        <Route
+          path="/billing-tracker"
+          element={
+            <AllowedRolesRoute allowedRoles={['superadmin']}>
+              <BillingTracker />
+            </AllowedRolesRoute>
+          }
+        />
+
+        {/* 🛠️ GITHUB INTEGRATIONS */}
+        <Route
+          path="/github-integrations"
+          element={
+            <AllowedRolesRoute allowedRoles={['superadmin','teamdeveloper','businessanalyst']}>
+              <GitHubIntegrations />
+            </AllowedRolesRoute>
+          }
+        />
+
+        {/* 📋 PRODUCT BACKLOG */}
+        <Route
+          path="/backlog"
+          element={
+            <AllowedRolesRoute allowedRoles={['businessanalyst', 'projectowner', 'productowner']}>
+              <BacklogPage />
+            </AllowedRolesRoute>
+          }
+        />
+      </Route>
+
+      {/* FALLBACK */}
+      <Route path="*" element={<Navigate to={user ? '/dashboard' : '/login'} replace />} />
+    </Routes>
+  );
+}
+
+function App() {
   return (
     <GoogleOAuthProvider
       clientId={
         import.meta.env.VITE_GOOGLE_CLIENT_ID ||
-        'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com'
+        '692937082573-r1udkbnlooteav7qhthhqnrl9s40vucd.apps.googleusercontent.com'
       }
     >
-      <Router>
-        <Routes>
-
-          {/* ====================================================== */}
-          {/* PUBLIC ROUTES                                          */}
-          {/* ====================================================== */}
-          <Route
-            path="/"
-            element={<Navigate to={user ? '/dashboard' : '/login'} replace />}
-          />
-
-          <Route
-            path="/login"
-            element={user ? <Navigate to="/dashboard" replace /> : <Login />}
-          />
-
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          
-          {/* ✉️ ACCEPT INVITE (Public/Semi-Public): 
-              Ditaruh di luar MainLayout agar user tidak melihat sidebar aplikasi saat mengisi form register/invite */}
-          <Route path="/accept-invite" element={<AcceptInvite />} />
-
-          {/* ====================================================== */}
-          {/* PROTECTED ROUTES (Wajib Login & Ber-Sidebar)          */}
-          {/* ====================================================== */}
-          <Route
-            element={
-              <ProtectedRoute>
-                <MainLayout userData={user} />
-              </ProtectedRoute>
-            }
-          >
-            {/* AMAN UNTUK SEMUA ROLE (Karyawan, PO, BA, Admin, Superadmin) */}
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/projects" element={<ProjectList />} />
-            <Route path="/projects/:id/*" element={<ProjectDetail />} />
-            <Route path="/info" element={<Info />} />
-            <Route path="/kelolaprofil" element={<KelolaProfil />} />
-            <Route path="/payment" element={<Payment />} />
-
-            {/* WORKSPACE BILLING (Bisa diakses Superadmin & Admin Workspace PT) */}
-            <Route
-              path="/billing"
-              element={
-                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin', 'admin']}>
-                  <Billing />
-                </AllowedRolesRoute>
-              }
-            />
-
-            {/* KELOLA KARYAWAN / USERS (Bisa diakses Superadmin & Admin Workspace PT) */}
-            <Route
-              path="/users"
-              element={
-                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin', 'admin']}>
-                  <Users />
-                </AllowedRolesRoute>
-              }
-            />
-
-            {/* ====================================================== */}
-            {/* KHUSUS MUTLAK SUPERADMIN ONLY (Platform Tenant Global) */}
-            {/* ====================================================== */}
-            
-            {/* 🏢 COMPANIES (Perusahaan SaaS) */}
-            <Route
-              path="/companies"
-              element={
-                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin']}>
-                  <Companies />
-                </AllowedRolesRoute>
-              }
-            />
-
-            {/* 💳 BILLING TRACKER (Billing Platform Global) */}
-            <Route
-              path="/billing-tracker"
-              element={
-                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin']}>
-                  <BillingTracker />
-                </AllowedRolesRoute>
-              }
-            />
-
-            {/* 🛠️ GITHUB INTEGRATIONS */}
-            <Route
-              path="/github-integrations"
-              element={
-                <AllowedRolesRoute userRole={userRole} allowedRoles={['superadmin']}>
-                  <GitHubIntegrations />
-                </AllowedRolesRoute>
-              }
-            />
-          </Route>
-
-          {/* FALLBACK */}
-          <Route path="*" element={<Navigate to={user ? '/dashboard' : '/login'} replace />} />
-
-        </Routes>
-      </Router>
+      {/* ✅ FIX: AuthProvider membungkus Router agar semua komponen bisa useAuth() */}
+      <AuthProvider>
+        <Router>
+          <AppRoutes />
+        </Router>
+      </AuthProvider>
     </GoogleOAuthProvider>
   );
 }

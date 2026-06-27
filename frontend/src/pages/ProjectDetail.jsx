@@ -15,6 +15,7 @@ import Development from '../components/project/Kanban';
 import Members from '../components/project/Members';
 import ProjectCalendar from '../components/project/ProjectCalendar';
 import GitHubStatusCard from '../components/github/GitHubStatusCard';
+import GitHubFeed from '../components/github/GitHubFeed';
 
 // ==========================================
 // INTERNAL COMPONENT: ACTIVITY LOGS
@@ -393,6 +394,8 @@ const DefaultView = ({ project, integrationData, refreshData }) => (
       <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Integrasi Aplikasi</h4>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <GitHubStatusCard project={project} integrationData={integrationData} refreshData={refreshData} />
+        {/* ✅ GitHub Feed: Menampilkan aktivitas commit & PR dari repository */}
+        <GitHubFeed projectId={project?.id} integrationData={integrationData} />
       </div>
     </div>
   </div>

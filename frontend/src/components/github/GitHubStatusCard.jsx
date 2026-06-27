@@ -38,9 +38,9 @@ const GitHubStatusCard = ({ project, integrationData, refreshData }) => {
     }
   };
 
-  // --- RENDER UNTUK ROLE SELAIN BA (HANYA INFORMASI REPO) ---
+  // --- RENDER UNTUK ROLE SELAIN BA (VISIBILITAS TEKNIS UNTUK DEVELOPER) ---
   if (!isBA) {
-    if (!integrationData || integrationData.status !== "ACTIVE") return null;
+    if (!integrationData) return null; // Jika belum ada data sama sekali, tetap kosong
     
     return (
       <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
@@ -48,11 +48,15 @@ const GitHubStatusCard = ({ project, integrationData, refreshData }) => {
           <div className="flex items-center gap-3">
             <div className="p-2 bg-slate-100 rounded-xl"><GithubIcon size={20} /></div>
             <div>
-              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider">GitHub Repository</h4>
-              <p className="text-sm font-bold text-slate-800">{integrationData.github_owner}/{integrationData.github_repo}</p>
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                GitHub Status: {integrationData.status || "N/A"}
+              </h4>
+              <p className="text-sm font-bold text-slate-800">
+                {integrationData.github_owner}/{integrationData.github_repo}
+              </p>
             </div>
           </div>
-          {integrationData.repo_url && (
+          {integrationData.status === "ACTIVE" && integrationData.repo_url && (
             <a href={integrationData.repo_url} target="_blank" rel="noopener noreferrer"
                className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white text-[10px] font-black rounded-xl uppercase hover:bg-black transition-all">
               <ExternalLink size={12} /> Buka Repo

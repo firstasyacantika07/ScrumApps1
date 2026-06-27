@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { EyeOff, Eye } from 'lucide-react';
-import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google'; // 🌟 Ditambahkan GoogleOAuthProvider
+import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 import api from '../api/axios';
+
+// ✅ FIX: Import useAuth agar login() bisa update state AuthContext
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -13,7 +16,9 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  // 🔌 Ambil Client ID dari Environment Variable (.env)
+  // ✅ FIX: Ambil fungsi login() dari AuthContext
+  const { login } = useAuth();
+
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
   // 🔐 HANDLER 1: Login Form Biasa (Email & Password)
@@ -35,8 +40,9 @@ const Login = () => {
       });
 
       if (response.data?.token) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
+        // ✅ FIX: Ganti localStorage.setItem manual dengan login() dari AuthContext
+        // login() otomatis simpan token, set axios header, dan update state user
+        login(response.data.token, response.data.user);
         
         if (rememberMe) {
           localStorage.setItem('remembered_email', email);
@@ -59,14 +65,13 @@ const Login = () => {
     setIsLoading(true);
     
     try {
-      // Mengirim token 'credential' dari Google ke backend untuk diverifikasi & diterbitkan JWT internal
       const response = await api.post('/auth/google', {
         token: credentialResponse.credential
       });
 
       if (response.data?.token) {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
+        // ✅ FIX: Sama seperti di atas, pakai login() dari AuthContext
+        login(response.data.token, response.data.user);
         navigate('/dashboard');
       }
     } catch (err) {
@@ -82,7 +87,6 @@ const Login = () => {
   };
 
   return (
-    // 🌟 Bungkus seluruh halaman atau bagian Google Login dengan GoogleOAuthProvider
     <GoogleOAuthProvider clientId={googleClientId}>
       <div className="flex min-h-screen w-full bg-white antialiased">
         
@@ -122,7 +126,6 @@ const Login = () => {
               <p className="text-slate-500 font-medium">Gunakan akun ScrumApps Anda.</p>
             </div>
 
-            {/* Alert Error Message */}
             {error && (
               <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold shadow-sm animate-fade-in">
                 {error}
@@ -183,7 +186,6 @@ const Login = () => {
               </button>
             </form>
 
-            {/* --- PEMBATAS / DIVIDER --- */}
             <div className="relative my-8">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t border-slate-100"></span>
@@ -193,7 +195,6 @@ const Login = () => {
               </div>
             </div>
 
-            {/* --- TOMBOL GOOGLE LOGIN AKTIF --- */}
             <div className="w-full flex justify-center GoogleLoginWrapper">
               <GoogleLogin
                 onSuccess={handleGoogleSuccess}

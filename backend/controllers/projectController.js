@@ -27,19 +27,15 @@ exports.createProject = async (req, res) => {
   try {
     const userId = req.user.id;
     const userRole = req.user.role ? String(req.user.role).toLowerCase() : '';
-    // Proteksi: Gunakan tenant_id dari token JWT, atau fallback ke header jika diizinkan
     const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
     if (!tenantId || tenantId == 0) {
       return res.status(400).json({ message: "Bad Request: Organisasi / Tenant ID tidak teridentifikasi." });
     }
 
-    // Hanya Admin Workspace (Tenant Owner) dan ProjectOwner yang boleh membuat proyek harian
     if (userRole === 'superadmin' || userRole === 'businessanalyst' || userRole === 'teamdeveloper') {
       return res.status(403).json({ message: "Akses Ditolak: Peran Anda tidak memiliki hak akses untuk membuat proyek baru." });
     }
-
-    // Aturan bisnis batasan kuota (FREE maks 1, PRO maks 15) sudah otomatis divalidasi oleh subscriptionMiddleware sebelum masuk ke sini
 
     const sql = `
       INSERT INTO tbr_projects 
@@ -54,7 +50,6 @@ exports.createProject = async (req, res) => {
 
     const [result] = await db.query(sql, values);
 
-    // Otomatis masukkan pembuat proyek ke tabel tbr_project_members sebagai penanggung jawab utama
     await db.query(
       `INSERT INTO tbr_project_members (project_id, user_id, role_in_project) VALUES (?, ?, ?)`,
       [result.insertId, userId, userRole === 'admin' ? 'ProjectOwner' : req.user.role]
@@ -75,7 +70,6 @@ exports.getProjects = async (req, res) => {
     let sql;
     let params;
 
-    // ✨ REVISI: Jika Superadmin Platform, bypass pengecekan hak milik (Murni Memantau Seluruh Proyek Tenant)
     if (userRole === 'superadmin') {
       sql = `
         SELECT p.*, tnt.package_type as tenant_package_type 
@@ -86,7 +80,6 @@ exports.getProjects = async (req, res) => {
       `;
       params = [tenantId];
     } else {
-      // Untuk pengguna reguler (Admin Workspace, PO, BA, Dev)
       sql = `
         SELECT p.*, tnt.package_type as tenant_package_type 
         FROM tbr_projects p 
@@ -113,7 +106,6 @@ exports.getProjectById = async (req, res) => {
     let sql;
     let params;
 
-    // ✨ REVISI: Superadmin Platform bypass validasi keanggotaan tim
     if (userRole === 'superadmin') {
       sql = `
         SELECT p.*, tnt.package_type as tenant_package_type 
@@ -153,7 +145,6 @@ exports.updateProject = async (req, res) => {
     const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
     const { name, start_date, end_date, status, repo_url } = req.body;
 
-    // Superadmin memantau read-only, tidak mengedit isi data manajemen internal tenant
     if (userRole === 'superadmin') {
       return res.status(403).json({ message: "Akses Ditolak: Superadmin hanya diizinkan memantau data secara Read-Only." });
     }
@@ -180,7 +171,6 @@ exports.deleteProject = async (req, res) => {
     const userRole = req.user.role ? String(req.user.role).toLowerCase() : '';
     const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
-    // Menghapus proyek adalah hak mutlak Admin Workspace / Tenant Owner
     if (userRole !== 'admin') {
       return res.status(403).json({ message: "Hanya Admin Workspace (Pemilik Organisasi) yang dapat menghapus proyek ini secara permanen." });
     }
@@ -659,24 +649,26 @@ exports.getProjectStats = async (req, res) => {
 exports.getWorkspaceScrumStats = async (req, res) => {
   try {
     const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
+    
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: "Tenant ID tidak ditemukan." });
+    }
 
-    // 1. Hitung agregasi status dari tbr_backlogs (atau tbr_developments sesuai kebutuhan sistem Anda)
-    // Di bawah ini contoh menghitung status dari tabel tbr_backlogs berdasarkan tenant_id
+    // Menggunakan LEFT JOIN agar query tetap jalan meskipun tabel kosong
     const [statusRows] = await db.query(`
       SELECT 
-        COUNT(*) as total_backlogs,
-        SUM(CASE WHEN status = 'hold' OR status = 'inactive' THEN 1 ELSE 0 END) as hold,
-        SUM(CASE WHEN status = 'progress' OR status = 'active' THEN 1 ELSE 0 END) as progress,
-        SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done,
-        SUM(CASE WHEN status = 'late' OR status = 'overdue' THEN 1 ELSE 0 END) as late
-      FROM tbr_backlogs b
-      INNER JOIN tbr_projects p ON b.project_id = p.id
+        COUNT(b.id) as total_backlogs,
+        SUM(CASE WHEN b.status IN ('hold', 'inactive') THEN 1 ELSE 0 END) as hold,
+        SUM(CASE WHEN b.status IN ('progress', 'active') THEN 1 ELSE 0 END) as progress,
+        SUM(CASE WHEN b.status = 'done' THEN 1 ELSE 0 END) as done,
+        SUM(CASE WHEN b.status IN ('late', 'overdue') THEN 1 ELSE 0 END) as late
+      FROM tbr_projects p
+      LEFT JOIN tbr_backlogs b ON p.id = b.project_id
       WHERE p.tenant_id = ?
     `, [tenantId]);
 
-    const stats = statusRows[0];
+    const stats = statusRows[0] || { total_backlogs: 0, hold: 0, progress: 0, done: 0, late: 0 };
 
-    // 2. Ambil data Sprint yang statusnya sedang berjalan (active / ongoing)
     const [sprintRows] = await db.query(`
       SELECT s.name, DATE_FORMAT(s.end_date, '%Y-%m-%d') as end_date 
       FROM tbr_sprints s
@@ -698,6 +690,7 @@ exports.getWorkspaceScrumStats = async (req, res) => {
     });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("DEBUG ERROR SCRUM STATS:", err.message);
+    res.status(500).json({ error: "Terjadi kesalahan server saat mengambil statistik." });
   }
 };

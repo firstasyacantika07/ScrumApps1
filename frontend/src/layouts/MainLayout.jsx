@@ -3,18 +3,24 @@ import { useNavigate, Outlet } from 'react-router-dom';
 import { User, Bell, Search, LogOut } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 
-const MainLayout = ({ userData }) => {
+// ✅ FIX: Import useAuth untuk ambil user & logout dari AuthContext
+import { useAuth } from '../context/AuthContext';
+
+// ✅ FIX: Hapus prop userData — ambil langsung dari AuthContext
+const MainLayout = () => {
+  // ✅ FIX: Gunakan logout() dari AuthContext, bukan localStorage.clear()
+  const { user, logout } = useAuth();
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false); // State untuk mengontrol sembunyi/munculnya menu
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const navigate = useNavigate();
 
-  if (!userData) return null;
+  if (!user) return null;
 
   return (
     <div className="flex h-screen w-full bg-[#f8fafc] font-sans overflow-hidden">
       
       {/* SIDEBAR AREA */}
-      {/* Lebar sidebar berubah secara dinamis: w-64 saat terbuka, w-20 saat tersembunyi */}
       <aside 
         className={`${
           isCollapsed ? 'w-20' : 'w-64'
@@ -55,14 +61,14 @@ const MainLayout = ({ userData }) => {
               >
                 <div className="h-10 w-10 rounded-lg overflow-hidden border-2 border-slate-100 shadow-sm">
                    <img 
-                     src={`https://ui-avatars.com/api/?name=${userData.username}&background=ee1e2d&color=fff`} 
+                     src={`https://ui-avatars.com/api/?name=${user.username}&background=ee1e2d&color=fff`} 
                      alt="user" 
                    />
                 </div>
                 <div className="hidden sm:block text-left leading-tight mr-2">
-                  <p className="text-sm font-bold text-slate-800">{userData.username}</p>
+                  <p className="text-sm font-bold text-slate-800">{user.username}</p>
                   <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">
-                    {userData.role}
+                    {user.role}
                   </p>
                 </div>
               </button>
@@ -78,9 +84,12 @@ const MainLayout = ({ userData }) => {
                   </button>
                   <hr className="my-2 border-slate-50" />
                   <button 
-                    onClick={() => { 
-                      localStorage.clear(); 
-                      navigate('/login'); 
+                    onClick={() => {
+                      setIsSettingsOpen(false);
+                      // ✅ FIX: Ganti localStorage.clear() + navigate dengan logout() dari AuthContext
+                      // logout() membersihkan token & state, ProtectedRoute otomatis redirect ke /login
+                      logout();
+                      navigate('/login');
                     }} 
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-sm font-bold text-[#ee1e2d] hover:bg-red-50 rounded-xl transition-colors"
                   >

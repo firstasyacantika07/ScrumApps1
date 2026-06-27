@@ -51,31 +51,37 @@ router.get('/', projectController.getProjects);
 
 // Mengambil URL OAuth GitHub untuk proses otentikasi
 router.get('/github/oauth-url', 
-    authorize(['superadmin']), 
+    authorize(['superadmin', 'admin', 'businessanalyst', 'teamdeveloper']), 
     githubController.getGitHubOAuthUrl
 );
 
 // Mengambil seluruh riwayat pengajuan integrasi dari semua proyek
 router.get('/github/requests', 
-    authorize(['superadmin']), 
+    authorize(['superadmin', 'admin', 'businessanalyst', 'teamdeveloper']), 
     githubController.getAllIntegrationRequests
 );
 
 // Menolak pengajuan integrasi repositori
 router.put('/github/requests/:id/reject', 
-    authorize(['superadmin']), 
+    authorize(['superadmin', 'admin']), 
     githubController.rejectIntegrationRequest
+);
+
+// TAMBAHAN: Menyetujui pengajuan & generate OAuth URL untuk Connect Repo
+router.put('/github/requests/:id/approve', 
+    authorize(['superadmin', 'admin']), 
+    githubController.approveIntegrationRequest
 );
 
 // Memutuskan hubungan repositori dengan proyek (Disconnect)
 router.delete('/github/integrations/:id', 
-    authorize(['superadmin']), 
+    authorize(['superadmin', 'admin']), 
     githubController.disconnectGitHub
 );
 
 // Menghubungkan Akun Personal GitHub Developer ke Profil Akun Internal
 router.post('/github/connect-personal', 
-    authorize(['superadmin', 'teamdeveloper']), 
+    authorize(['superadmin', 'admin', 'businessanalyst', 'teamdeveloper']), 
     githubController.connectPersonalAccount
 );
 
@@ -151,9 +157,11 @@ router.get('/:projectId/logs', projectController.getProjectLogs);
    ===================================================== */
 router.get('/:projectId/github-status', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst', 'teamdeveloper']), githubController.getIntegrationByProject);
 router.get('/:projectId/github-activity', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst', 'teamdeveloper']), githubController.getRepoActivity);
-router.post('/:projectId/github-requests', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), githubController.createIntegrationRequest);
-router.post('/:projectId/github-sync-backlog', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), githubController.syncBacklogWithGitHub);
-router.post('/:projectId/github-webhooks', authorize(['superadmin', 'admin']), githubController.configureWebhook);
+// 🔒 FIX: Hapus projectowner — PO Read Only, tidak boleh buat request GitHub
+router.post('/:projectId/github-requests', authorize(['superadmin', 'admin', 'businessanalyst']), githubController.createIntegrationRequest);
+// 🔒 FIX: Hapus projectowner, tambah teamdeveloper
+router.post('/:projectId/github-sync-backlog', authorize(['superadmin', 'admin', 'businessanalyst', 'teamdeveloper']), githubController.syncBacklogWithGitHub);
+router.post('/:projectId/github-webhooks', authorize(['superadmin', 'admin', 'businessanalyst']), githubController.configureWebhook);
 router.post('/:projectId/github-pat', authorize(['superadmin', 'admin']), githubController.managePAT);
 
 

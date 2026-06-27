@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api from "../../api/axios";
 import * as Lucide from "lucide-react"; 
 
 const GitHubIntegrations = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, msg: "", type: "" });
@@ -31,22 +32,62 @@ const GitHubIntegrations = () => {
     }
   };
 
+  // FIX 1: Tangani redirect balik dari GitHub OAuth (success/error di query param)
+  useEffect(() => {
+    const success = searchParams.get("success");
+    const error   = searchParams.get("error");
+
+    if (success === "connected") {
+      showToast("Repositori GitHub berhasil terhubung!", "success");
+      // Bersihkan query param dari URL tanpa reload
+      navigate("/github-integrations", { replace: true });
+    } else if (error) {
+      const errorMessages = {
+        oauth_denied:      "Otentikasi GitHub dibatalkan oleh pengguna.",
+        missing_params:    "Parameter OAuth tidak lengkap dari GitHub.",
+        token_failed:      "Gagal menukar kode OAuth dengan access token.",
+        request_not_found: "ID pengajuan tidak ditemukan di database.",
+        server_error:      "Terjadi kesalahan server saat proses OAuth.",
+      };
+      showToast(errorMessages[error] || `Error OAuth: ${error}`, "error");
+      navigate("/github-integrations", { replace: true });
+    }
+  }, [searchParams]);
+
   useEffect(() => {
     fetchRequests();
   }, []);
 
+  // FIX 2: Panggil PUT /approve dulu untuk update status DB,
+  // lalu redirect ke oauth_url yang dikembalikan backend.
+  // Sebelumnya langsung GET oauth-url tanpa approve → status DB tidak pernah diupdate.
   const handleApproveAndConnect = async (requestId) => {
     try {
+      showToast("Memproses persetujuan...", "success");
+
+      // Step 1: Approve di DB → backend kembalikan oauth_url
+      const approveRes = await api.put(`/projects/github/requests/${requestId}/approve`);
+      const oauthUrl = approveRes.data?.oauth_url;
+
+      if (!oauthUrl) {
+        showToast("Gagal mendapatkan URL OAuth dari server", "error");
+        return;
+      }
+
       showToast("Mengarahkan ke otentikasi GitHub...", "success");
       sessionStorage.setItem("pending_request_id", requestId);
-      
-      const res = await api.get(`/projects/github/oauth-url?request_id=${requestId}`);
-      if (res.data?.url) {
-        window.location.href = res.data.url; 
-      }
+
+      // Step 2: Redirect ke GitHub OAuth
+      setTimeout(() => {
+        window.location.href = oauthUrl;
+      }, 800);
+
     } catch (error) {
       console.error(error);
-      showToast("Gagal memproses otentikasi GitHub", "error");
+      showToast(
+        error.response?.data?.error || "Gagal memproses otentikasi GitHub",
+        "error"
+      );
     }
   };
 
@@ -62,10 +103,12 @@ const GitHubIntegrations = () => {
     }
   };
 
+  // FIX 3: URL delete salah — /integrations/:id tidak ada di routes.
+  // Yang benar: DELETE /projects/github/:id (sesuai githubRoutes.js)
   const handleDisconnect = async (id) => {
     if (!window.confirm("Putuskan koneksi GitHub dari project ini? Otomatisasi Kanban akan terhenti.")) return;
     try {
-      await api.delete(`/projects/github/integrations/${id}`);
+      await api.delete(`/projects/github/${id}`); // ← FIX: hapus '/integrations'
       showToast("Koneksi repositori diputuskan", "success");
       fetchRequests();
     } catch (error) {
@@ -86,14 +129,13 @@ const GitHubIntegrations = () => {
         showToast("Webhook GitHub berhasil aktif!");
       }
     } catch (error) {
-      // 🌟 FIX: Mencegat status 409 (Conflict) agar ditangani sebagai informasi sukses, bukan error crash
       if (error.response && error.response.status === 409) {
         showToast(
           error.response.data?.message || "Webhook sudah aktif dan terkonfigurasi di repositori ini.", 
           "success"
         );
       } else {
-        console.error("❌ Gagal konfigurasi webhook:", error);
+        console.error("Gagal konfigurasi webhook:", error);
         showToast(
           error.response?.data?.message || "Gagal mendaftarkan webhook ke GitHub", 
           "error"
@@ -107,11 +149,46 @@ const GitHubIntegrations = () => {
     return url.startsWith("http") ? url : `https://${url}`;
   };
 
+  // FIX 4: Tambah CONNECTED ke mapping status (backend simpan 'CONNECTED' bukan 'ACTIVE')
+  const getStatusStyle = (status) => {
+    switch (status) {
+      case "CONNECTED":
+      case "ACTIVE":
+        return "bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm shadow-emerald-100/50";
+      case "PENDING":
+        return "bg-amber-50 text-amber-700 border border-amber-200 shadow-sm shadow-amber-100/50";
+      case "APPROVED":
+        return "bg-blue-50 text-blue-700 border border-blue-200";
+      default:
+        return "bg-rose-50 text-rose-700 border border-rose-200 shadow-sm shadow-rose-100/50";
+    }
+  };
+
+  const getDotStyle = (status) => {
+    switch (status) {
+      case "CONNECTED":
+      case "ACTIVE":    return "bg-emerald-500 animate-pulse";
+      case "PENDING":   return "bg-amber-500 animate-pulse";
+      case "APPROVED":  return "bg-blue-500 animate-pulse";
+      default:          return "bg-rose-500";
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case "CONNECTED": return "Connected";
+      case "ACTIVE":    return "Active";
+      case "PENDING":   return "Pending";
+      case "APPROVED":  return "Approved";
+      default:          return status || "Rejected";
+    }
+  };
+
   return (
     <div className="p-6 bg-slate-50/50 min-h-screen font-sans">
-      {/* TOAST SYSTEM */}
+      {/* TOAST */}
       {toast.show && (
-        <div className={`fixed top-5 right-5 z-[9999] px-5 py-3.5 rounded-xl shadow-xl text-white font-medium flex items-center gap-2 transition-all duration-300 transform translate-y-0 ${
+        <div className={`fixed top-5 right-5 z-[9999] px-5 py-3.5 rounded-xl shadow-xl text-white font-medium flex items-center gap-2 transition-all duration-300 ${
           toast.type === "error" ? "bg-red-600" : "bg-slate-900"
         }`}>
           {toast.type === "error" ? <X size={16} /> : <Check size={16} />}
@@ -119,7 +196,7 @@ const GitHubIntegrations = () => {
         </div>
       )}
 
-      {/* HEADER SECTION */}
+      {/* HEADER */}
       <div className="bg-white rounded-2xl border border-slate-100 p-6 mb-6 shadow-sm">
         <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
           <span>Super Admin</span>
@@ -137,7 +214,7 @@ const GitHubIntegrations = () => {
         </p>
       </div>
 
-      {/* MAIN CONTAINER TABLE */}
+      {/* TABLE */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="px-6 py-5 border-b border-slate-50 flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-800">Daftar Pengajuan Log Integrasi</h2>
@@ -173,7 +250,11 @@ const GitHubIntegrations = () => {
               <tbody className="text-sm text-slate-700 divide-y divide-slate-100">
                 {requests.map((req) => {
                   const currentStatus = req.status ? req.status.toUpperCase() : "";
-                  
+                  const isConnected = currentStatus === "CONNECTED" || currentStatus === "ACTIVE";
+                  const isPending   = currentStatus === "PENDING";
+                  const isApproved  = currentStatus === "APPROVED";
+                  const isRejected  = !isConnected && !isPending && !isApproved;
+
                   return (
                     <tr key={req.id} className="hover:bg-slate-50/40 transition-colors duration-150">
                       <td className="py-4 px-6 font-semibold text-slate-800">{req.project_name}</td>
@@ -191,26 +272,15 @@ const GitHubIntegrations = () => {
                       </td>
                       
                       <td className="py-4 px-6 text-center whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
-                          currentStatus === "ACTIVE" 
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm shadow-emerald-100/50" 
-                            : currentStatus === "PENDING" 
-                            ? "bg-amber-50 text-amber-700 border border-amber-200 shadow-sm shadow-amber-100/50" 
-                            : "bg-rose-50 text-rose-700 border border-rose-200 shadow-sm shadow-rose-100/50"
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            currentStatus === "ACTIVE" ? "bg-emerald-500 animate-pulse" :
-                            currentStatus === "PENDING" ? "bg-amber-500 animate-pulse" : "bg-rose-500"
-                          }`} />
-                          {currentStatus === "ACTIVE" && "Active"}
-                          {currentStatus === "PENDING" && "Pending"}
-                          {currentStatus !== "ACTIVE" && currentStatus !== "PENDING" && "Rejected"}
+                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${getStatusStyle(currentStatus)}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${getDotStyle(currentStatus)}`} />
+                          {getStatusLabel(currentStatus)}
                         </span>
                       </td>
 
                       <td className="py-4 px-6">
                         <div className="flex items-center justify-center gap-2">
-                          {currentStatus === "PENDING" && (
+                          {isPending && (
                             <>
                               <button
                                 onClick={() => handleApproveAndConnect(req.id)}
@@ -220,23 +290,28 @@ const GitHubIntegrations = () => {
                               </button>
                               <button
                                 onClick={() => handleReject(req.id)}
-                                className="bg-white hover:bg-rose-600 text-rose-600 hover:text-white px-3 py-1.5 rounded-lg border border-rose-200 hover:border-rose-600 transition-all duration-150 text-xs font-medium"
+                                className="bg-white hover:bg-rose-600 text-rose-600 hover:text-white px-3 py-1.5 rounded-lg border border-rose-200 hover:border-rose-600 transition-all duration-150 text-xs font-medium flex items-center gap-1"
                               >
                                 {X && <X size={14} />} Reject Request
                               </button>
                             </>
                           )}
+
+                          {/* APPROVED — menunggu user selesaikan OAuth di GitHub */}
+                          {isApproved && (
+                            <span className="text-xs text-blue-500 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md font-medium italic">
+                              Menunggu OAuth GitHub...
+                            </span>
+                          )}
                           
-                          {currentStatus === "ACTIVE" && (
+                          {isConnected && (
                             <>
                               <button
                                 onClick={() => handleConfigureWebhook(req.project_id || req.id)}
                                 className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm text-xs font-semibold flex items-center gap-1.5"
-                                title="Konfigurasi Webhook Kanban"
                               >
                                 {Webhook && <Webhook size={13} className="text-slate-300" />} Sync Webhook
                               </button>
-                              
                               <button
                                 onClick={() => handleDisconnect(req.id)}
                                 className="bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 px-3 py-1.5 rounded-lg border border-rose-200 transition-all duration-150 text-xs font-semibold flex items-center gap-1.5"
@@ -246,8 +321,8 @@ const GitHubIntegrations = () => {
                             </>
                           )}
                           
-                          {currentStatus !== "PENDING" && currentStatus !== "ACTIVE" && (
-                            <span className="text-xs text-rose-400 bg-rose-50/50 border border-rose-100 px-2.5 py-1 rounded-md font-medium select-none italic">
+                          {isRejected && (
+                            <span className="text-xs text-rose-400 bg-rose-50/50 border border-rose-100 px-2.5 py-1 rounded-md font-medium italic">
                               Archived / Rejected
                             </span>
                           )}
