@@ -3,18 +3,18 @@ import { useNavigate, Outlet } from 'react-router-dom';
 import { User, Bell, Search, LogOut } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 
-// ✅ FIX: Import useAuth untuk ambil user & logout dari AuthContext
+// ✅ Import useAuth untuk ambil user & logout dari AuthContext
 import { useAuth } from '../context/AuthContext';
 
-// ✅ FIX: Hapus prop userData — ambil langsung dari AuthContext
 const MainLayout = () => {
-  // ✅ FIX: Gunakan logout() dari AuthContext, bukan localStorage.clear()
+  // ✅ Ambil objek 'user' dari global auth context
   const { user, logout } = useAuth();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const navigate = useNavigate();
 
+  // Jika session kosong/loading belum selesai, return null agar tidak crash
   if (!user) return null;
 
   return (
@@ -26,7 +26,12 @@ const MainLayout = () => {
           isCollapsed ? 'w-20' : 'w-64'
         } transition-all duration-300 flex-shrink-0 z-50 bg-[#1e1e2d] shadow-2xl relative`}
       >
-        <Sidebar isCollapsed={isCollapsed} setIsCollapsed={setIsCollapsed} />
+        {/* 🔥 FIX: Mengalirkan variabel 'user' ke prop userData Sidebar */}
+        <Sidebar 
+          isCollapsed={isCollapsed} 
+          setIsCollapsed={setIsCollapsed} 
+          userData={user} 
+        />
       </aside>
 
       {/* MAIN CONTENT AREA */}
@@ -61,7 +66,7 @@ const MainLayout = () => {
               >
                 <div className="h-10 w-10 rounded-lg overflow-hidden border-2 border-slate-100 shadow-sm">
                    <img 
-                     src={`https://ui-avatars.com/api/?name=${user.username}&background=ee1e2d&color=fff`} 
+                     src={`https://ui-avatars.com/api/?name=${user.username || 'User'}&background=ee1e2d&color=fff`} 
                      alt="user" 
                    />
                 </div>
@@ -86,8 +91,6 @@ const MainLayout = () => {
                   <button 
                     onClick={() => {
                       setIsSettingsOpen(false);
-                      // ✅ FIX: Ganti localStorage.clear() + navigate dengan logout() dari AuthContext
-                      // logout() membersihkan token & state, ProtectedRoute otomatis redirect ke /login
                       logout();
                       navigate('/login');
                     }} 
@@ -103,7 +106,8 @@ const MainLayout = () => {
 
         {/* CONTENT AREA */}
         <main className="flex-1 overflow-y-auto p-8 bg-[#f8fafc]">
-          <Outlet /> 
+          {/* 🌟 FIX: Salurkan context dengan nama 'user' yang valid */}
+          <Outlet context={{ user }} /> 
         </main>
 
       </div>

@@ -16,7 +16,7 @@ const Users = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
 
-  // DISESUAIKAN: Hanya menampung email dan role untuk keperluan Invite
+  // Hanya menampung email dan role untuk keperluan Invite
   const [newUser, setNewUser] = useState({
     email: '',
     role: 'TeamDeveloper'
@@ -40,12 +40,13 @@ const Users = () => {
       setUsersData(res.data?.data || res.data || []);
     } catch (err) {
       console.error("GET WORKSPACE USERS ERROR:", err);
-      // Fallback Mock Data untuk visualisasi
+      // Fallback Mock Data untuk visualisasi dengan penyesuaian kolom kosong pada user baru
       setUsersData([
         { id: 1, name: "Icha Moderator", email: "icha@cahyacell.com", phone_number: "08123456789", role: "BusinessAnalyst", gender: "female" },
         { id: 2, name: "Zul Co-Host", email: "zul@cahyacell.com", phone_number: "08234567890", role: "ProjectOwner", gender: "male" },
         { id: 3, name: "Fauzi Editor", email: "fauzi@cahyacell.com", phone_number: "08345678901", role: "TeamDeveloper", gender: "male" },
         { id: 4, name: "Alda Audience", email: "alda@cahyacell.com", phone_number: "08456789012", role: "TeamDeveloper", gender: "female" },
+        { id: 5, name: null, email: "kandidatbaru@gmail.com", phone_number: null, role: "TeamDeveloper", gender: null } // Contoh state pending
       ]);
     } finally {
       setLoading(false);
@@ -77,7 +78,7 @@ const Users = () => {
   const handleDelete = async (id) => {
     try {
       await api.delete(`/users/${id}`);
-      alert("Akses pengguna ke workspace berhasil dicabut.");
+      alert("Akses pengguna atau tautan undangan berhasil dicabut dari workspace.");
       fetchUsers();
     } catch (err) {
       console.error("REVOKE USER ERROR:", err);
@@ -92,7 +93,9 @@ const Users = () => {
   };
 
   const filteredUsers = usersData.filter((user) => {
-    const matchesSearch = user.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    // Penanganan pencarian aman jika user.name bernilai null/pending
+    const nameString = user.name || "pending menunggu aktivasi";
+    const matchesSearch = nameString.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           user.email?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     return matchesSearch && matchesRole;
@@ -191,51 +194,82 @@ const Users = () => {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u, i) => (
-                  <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="p-6 text-center text-slate-400 font-bold text-xs">{i + 1}</td>
-                    <td className="p-6 font-black text-slate-800 text-sm flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold border ${u.gender === 'female' ? 'bg-pink-50 border-pink-100 text-pink-500' : 'bg-blue-50 border-blue-100 text-blue-500'}`}>
-                        <User size={16} />
-                      </div>
-                      {u.name || <span className="text-amber-500 text-xs font-bold italic">Pending (Belum Aktivasi)</span>}
-                    </td>
-                    <td className="p-6 text-slate-600 font-semibold text-xs">
-                      <span className="flex items-center gap-1.5"><Phone size={12} className="text-slate-400" /> {u.phone_number || "-"}</span>
-                    </td>
-                    <td className="p-6 text-slate-600 font-semibold text-xs">
-                      <span className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400" /> {u.email}</span>
-                    </td>
-                    <td className="p-6">
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getRoleBadgeStyle(u.role)}`}>
-                        {u.role}
-                      </span>
-                    </td>
-                    <td className="p-6 text-center">
-                      {u.role === 'Admin' && currentAdmin?.email === u.email ? (
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center justify-center gap-1"><ShieldCheck size={12}/> Anda</span>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setDeleteTarget(u.id);
-                            setIsDeleteModalOpen(true);
-                          }}
-                          className="p-2 text-slate-400 hover:text-white hover:bg-[#ee1e2d] rounded-xl transition-all border border-transparent hover:border-red-200"
-                          title="Cabut Akses Workspace"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+                filteredUsers.map((u, i) => {
+                  // Cek apakah user berstatus pending (belum mengisi profil via tautan email)
+                  const isPending = !u.name;
+
+                  return (
+                    <tr key={u.id || i} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-6 text-center text-slate-400 font-bold text-xs">{i + 1}</td>
+                      
+                      {/* NAMA ANGGOTA DENGAN KONDISIONAL AVATAR */}
+                      <td className="p-6 font-black text-slate-800 text-sm flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold border ${
+                          isPending 
+                            ? 'bg-amber-50 border-amber-100 text-amber-500 animate-pulse' 
+                            : u.gender === 'female' 
+                              ? 'bg-pink-50 border-pink-100 text-pink-500' 
+                              : 'bg-blue-50 border-blue-100 text-blue-500'
+                        }`}>
+                          <User size={16} />
+                        </div>
+                        {u.name || (
+                          <div className="flex flex-col">
+                            <span className="text-amber-600 text-xs font-black uppercase tracking-wider">Pending</span>
+                            <span className="text-[10px] text-slate-400 font-medium font-mono">Menunggu Aktivasi</span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* KONTAK TELEPON */}
+                      <td className="p-6 text-slate-600 font-semibold text-xs">
+                        <span className="flex items-center gap-1.5">
+                          <Phone size={12} className="text-slate-400" /> 
+                          {u.phone_number || <span className="text-slate-300 font-normal italic">Belum diatur</span>}
+                        </span>
+                      </td>
+
+                      {/* ALAMAT EMAIL */}
+                      <td className="p-6 text-slate-600 font-semibold text-xs">
+                        <span className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400" /> {u.email}</span>
+                      </td>
+
+                      {/* STRUKTUR PERAN */}
+                      <td className="p-6">
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getRoleBadgeStyle(u.role)}`}>
+                          {u.role}
+                        </span>
+                      </td>
+
+                      {/* AKSI DINAMIS */}
+                      <td className="p-6 text-center">
+                        {u.role === 'Admin' && currentAdmin?.email === u.email ? (
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center justify-center gap-1">
+                            <ShieldCheck size={12}/> Anda
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setDeleteTarget(u.id);
+                              setIsDeleteModalOpen(true);
+                            }}
+                            className="p-2 text-slate-400 hover:text-white hover:bg-[#ee1e2d] rounded-xl transition-all border border-transparent hover:border-red-200"
+                            title={isPending ? "Batalkan Undangan Email" : "Cabut Akses Workspace"}
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* MODAL INVITE (Form Disederhanakan untuk Pengiriman Email) */}
+      {/* MODAL INVITE */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl max-w-md w-full p-8 overflow-hidden transform animate-in zoom-in-95 duration-200">
@@ -282,7 +316,7 @@ const Users = () => {
         </div>
       )}
 
-      {/* MODAL DELETE */}
+      {/* MODAL DELETE / REVOKE */}
       {isDeleteModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl max-w-sm w-full p-8 text-center transform animate-in zoom-in-95 duration-200">
@@ -291,7 +325,7 @@ const Users = () => {
             </div>
             <h3 className="text-base font-black text-slate-800 tracking-tight">Cabut Akses Anggota?</h3>
             <p className="text-slate-400 font-medium text-xs mt-2 leading-relaxed">
-              Tindakan ini akan menghapus user secara permanen dari ruang kerja organisasi. Akun terkait tidak dapat mengakses proyek lagi.
+              Tindakan ini akan menghapus user atau membatalkan tautan undangan pending secara permanen dari organisasi ini.
             </p>
             <div className="flex gap-3 mt-6">
               <button

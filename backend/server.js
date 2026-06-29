@@ -47,6 +47,7 @@ const superadminRoutes = require('./routes/superadminRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
+
 // Import tambahan untuk keperluan bypass controller & middleware
 const paymentController = require('./controllers/paymentController');
 const { verifyToken } = require('./middleware/auth');
@@ -55,20 +56,21 @@ const { verifyToken } = require('./middleware/auth');
    API ROUTES
 ========================================================= */
 
+// 👑 1. ROUTE UTAMA & AUTENTIKASI (Tanpa Wildcard Menggantung)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-// projectRoutes sudah mencakup semua route /github/* via githubController
-// githubRoutes terpisah DIHAPUS karena menyebabkan bentrok dengan projectRoutes
-app.use('/api/projects', projectRoutes);
 
-app.use('/api/dashboard', verifyToken, dashboardRoutes);
+// 👑 2. SUPERADMIN ROUTES (Ditaruh di atas agar tidak sengaja termakan rute dinamis billing/project)
 app.use('/api/superadmin', superadminRoutes);
-app.use('/api/billing', billingRoutes);
+
+// 📦 3. FITUR REGULAR & SUBSCRIPTION
+app.use('/api/projects', projectRoutes);
+app.use('/api/dashboard', verifyToken, dashboardRoutes);
+app.use('/api/billing', billingRoutes); 
 app.use('/api/subscription', subscriptionRoutes);
 
-// 💡 BYPASS STRATEGY
+// 💡 BYPASS STRATEGY PAYMENT
 app.post('/api/payment/create-transaction', verifyToken, paymentController.createPayment);
-
 app.use('/api/payment', paymentRoutes);
 
 /* =========================================================

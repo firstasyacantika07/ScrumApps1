@@ -1,73 +1,40 @@
 import React, { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { 
   Building, Search, Filter, ShieldAlert, 
-  CheckCircle, AlertTriangle, Eye, RefreshCw, 
-  MoreVertical, Download, ExternalLink 
+  CheckCircle, AlertTriangle, RefreshCw, 
+  ExternalLink 
 } from 'lucide-react';
 import api from '../../api/axios';
 
 const CompanyManagement = () => {
+  const { user } = useOutletContext(); 
+
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterPackage, setFilterPackage] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [actionLoading, setActionLoading] = useState(null); // Menyimpan ID perusahaan yang sedang diproses
+  const [actionLoading, setActionLoading] = useState(null);
 
-  // Mengambil data tenants dari backend
+  // 🟢 AMBIL DATA ASLI DARI DATABASE
   const fetchCompanies = async () => {
     setLoading(true);
     try {
-      // Endpoint disesuaikan dengan arsitektur backend superadmin kamu
       const response = await api.get('/superadmin/companies');
-      setCompanies(response.data?.data || response.data || []);
+      
+      // Membongkar response objek (.data.data) sesuai struktur backend Express
+      if (response.data && response.data.success) {
+        setCompanies(response.data.data);
+      } else if (Array.isArray(response.data)) {
+        setCompanies(response.data);
+      } else {
+        throw new Error("Format data API tidak dikenali");
+      }
     } catch (error) {
-      console.error("Gagal mengambil data tenants:", error);
-      // Dummy data fallback jika API belum siap, disesuaikan persis dengan struktur tbr_tenants kamu
-      setCompanies([
-        {
-          id: 1,
-          company_name: "PT Tech Innovator Indonesia",
-          subdomain: "techinnovator",
-          plan_id: 2,
-          status: "active",
-          package_type: "PRO",
-          billing_cycle: "monthly",
-          trial_start: null,
-          trial_end: null,
-          subscription_ends_at: "2026-12-31",
-          company_logo: null,
-          created_at: "2026-01-15"
-        },
-        {
-          id: 2,
-          company_name: "Cahya Kreatif Studio",
-          subdomain: "cahyakreatif",
-          plan_id: 1,
-          status: "trial",
-          package_type: "FREE",
-          billing_cycle: "none",
-          trial_start: "2026-06-20",
-          trial_end: "2026-07-04",
-          subscription_ends_at: null,
-          company_logo: null,
-          created_at: "2026-06-20"
-        },
-        {
-          id: 3,
-          company_name: "Nusantara Digital Corp",
-          subdomain: "nusantara",
-          plan_id: 3,
-          status: "suspended",
-          package_type: "ENTERPRISE",
-          billing_cycle: "yearly",
-          trial_start: null,
-          trial_end: null,
-          subscription_ends_at: "2026-05-01",
-          company_logo: null,
-          created_at: "2025-05-01"
-        }
-      ]);
+      console.error("Gagal mengambil data tenants dari database:", error);
+      alert("Koneksi API gagal. Pastikan backend Express menyala.");
+      setCompanies([]); // Kosongkan data agar tidak memunculkan data tiruan lagi
     } finally {
       setLoading(false);
     }
@@ -77,7 +44,7 @@ const CompanyManagement = () => {
     fetchCompanies();
   }, []);
 
-  // Fungsi untuk mengubah status perusahaan (Suspend / Activate)
+  // 🟢 TOGGLE STATUS AKTIF / SUSPEND DI DATABASE ASLI
   const handleToggleStatus = async (id, currentStatus) => {
     const newStatus = currentStatus === 'suspended' ? 'active' : 'suspended';
     const confirmMsg = `Apakah Anda yakin ingin mengubah status perusahaan ini menjadi ${newStatus.toUpperCase()}?`;
@@ -86,12 +53,14 @@ const CompanyManagement = () => {
 
     setActionLoading(id);
     try {
+      // Menembak endpoint patch status
       await api.patch(`/superadmin/companies/${id}/status`, { status: newStatus });
-      // Update state lokal jika sukses
+      
+      // Update state lokal secara berkala agar UI instan berubah
       setCompanies(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c));
     } catch (error) {
       console.error("Gagal mengubah status perusahaan:", error);
-      alert("Gagal memperbarui status perusahaan. Silakan coba lagi.");
+      alert(error.response?.data?.message || "Gagal memperbarui status ke database. Silakan coba lagi.");
     } finally {
       setActionLoading(null);
     }
@@ -99,13 +68,20 @@ const CompanyManagement = () => {
 
   // Logika Pencarian dan Filter Frontend
   const filteredCompanies = companies.filter(company => {
-    const matchesSearch = company.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          company.subdomain?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesPackage = filterPackage === 'all' || company.package_type?.toUpperCase() === filterPackage.toUpperCase();
-    const matchesStatus = filterStatus === 'all' || company.status?.toLowerCase() === filterStatus.toLowerCase();
+    const matchesSearch = (company.company_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+                          (company.subdomain?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+    const matchesPackage = filterPackage === 'all' || (company.package_type?.toUpperCase() === filterPackage.toUpperCase());
+    const matchesStatus = filterStatus === 'all' || (company.status?.toLowerCase() === filterStatus.toLowerCase());
     
     return matchesSearch && matchesPackage && matchesStatus;
   });
+
+  // Helper formatting tanggal aman (mencegah "Invalid Date")
+  const formatDate = (dateString) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? '-' : date.toLocaleDateString('id-ID');
+  };
 
   // Helper badge warna untuk status
   const getStatusBadge = (status) => {
@@ -143,7 +119,7 @@ const CompanyManagement = () => {
             <Building className="text-[#ee1e2d]" size={32} /> Kelola Perusahaan SaaS
           </h2>
           <p className="text-slate-400 font-bold mt-1 uppercase text-[10px] tracking-[3px]">
-            Manajemen Lisensi Organisasi, Status Penagihan `tbr_tenants`, dan Kontrol Pembekuan Akses Global.
+            Manajemen Lisensi Organisasi, Status Penagihan langsung dari database, dan Kontrol Akses Global.
           </p>
         </div>
         <button onClick={fetchCompanies} className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black transition-all border border-slate-200">
@@ -211,26 +187,25 @@ const CompanyManagement = () => {
                 <tr>
                   <td colSpan="6" className="p-20 text-center">
                     <div className="w-8 h-8 border-4 border-slate-100 border-t-[#ee1e2d] rounded-full animate-spin mx-auto"></div>
-                    <p className="text-xs font-bold text-slate-400 mt-4 uppercase tracking-wider">Memuat Data Tenant...</p>
+                    <p className="text-xs font-bold text-slate-400 mt-4 uppercase tracking-wider">Memuat Data Tenant Real-Time...</p>
                   </td>
                 </tr>
               ) : filteredCompanies.length === 0 ? (
                 <tr>
                   <td colSpan="6" className="p-20 text-center text-slate-400 font-bold text-xs uppercase tracking-wider">
-                    Tidak ada perusahaan yang cocok dengan kriteria filter.
+                    Tidak ada perusahaan yang terdaftar di database.
                   </td>
                 </tr>
               ) : (
                 filteredCompanies.map((company) => (
                   <tr key={company.id} className="hover:bg-slate-50/50 transition-colors">
-                    {/* Kolom Nama & Subdomain */}
                     <td className="p-6">
                       <div className="flex items-center gap-4">
                         <div className="w-11 h-11 bg-slate-100 border rounded-xl flex items-center justify-center font-black text-[#ee1e2d] text-sm shrink-0">
                           {company.company_logo ? (
                             <img src={company.company_logo} alt="Logo" className="w-full h-full object-cover rounded-xl" />
                           ) : (
-                            company.company_name?.charAt(0).toUpperCase()
+                            (company.company_name || 'C').charAt(0).toUpperCase()
                           )}
                         </div>
                         <div>
@@ -242,41 +217,38 @@ const CompanyManagement = () => {
                       </div>
                     </td>
 
-                    {/* Kolom Paket */}
-                    <td className="p-6 vertical-middle">
+                    <td className="p-6">
                       {getPackageBadge(company.package_type)}
                       <p className="text-[10px] font-bold text-slate-400 mt-1">ID Paket: #{company.plan_id}</p>
                     </td>
 
-                    {/* Kolom Siklus Billing */}
                     <td className="p-6">
                       <p className="text-xs font-black text-slate-700 uppercase tracking-wide">{company.billing_cycle || 'N/A'}</p>
-                      <p className="text-[9px] font-bold text-slate-400 mt-0.5">Terdaftar: {new Date(company.created_at).toLocaleDateString('id-ID')}</p>
+                      <p className="text-[9px] font-bold text-slate-400 mt-0.5">Terdaftar: {formatDate(company.created_at)}</p>
                     </td>
 
-                    {/* Kolom Batas Waktu / Expiry */}
                     <td className="p-6">
                       {company.status === 'trial' ? (
                         <div>
                           <p className="text-xs font-bold text-amber-600">Selesai Trial:</p>
-                          <p className="text-[11px] font-black text-slate-700">{company.trial_ends_at ? new Date(company.trial_ends_at).toLocaleDateString('id-ID') : new Date(company.trial_end).toLocaleDateString('id-ID')}</p>
+                          <p className="text-[11px] font-black text-slate-700">
+                            {formatDate(company.trial_end || company.trial_start)}
+                          </p>
                         </div>
                       ) : company.subscription_ends_at ? (
                         <div>
                           <p className="text-xs font-bold text-slate-500">Berakhir Pada:</p>
-                          <p className="text-[11px] font-black text-slate-700">{new Date(company.subscription_ends_at).toLocaleDateString('id-ID')}</p>
+                          <p className="text-[11px] font-black text-slate-700">{formatDate(company.subscription_ends_at)}</p>
                         </div>
                       ) : (
                         <p className="text-xs font-bold text-slate-400">-</p>
                       )}
                     </td>
 
-                    {/* Kolom Status */}
                     <td className="p-6">
                       {getStatusBadge(company.status)}
                     </td>
 
-                    {/* Kolom Tombol Aksi Kendali */}
                     <td className="p-6 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button 

@@ -22,15 +22,15 @@ import {
    ROLE CONSTANT
 ========================================================= */
 export const ROLES = {
-  SUPERADMIN: "Superadmin",
-  ADMIN: "Admin", 
-  PROJECT_OWNER: "ProjectOwner",
-  TEAM_DEVELOPER: "teamDeveloper",
-  BUSINESS_ANALYST: "BusinessAnalyst"
+  SUPERADMIN: "superadmin",
+  ADMIN: "admin", 
+  PROJECT_OWNER: "projectowner",
+  TEAM_DEVELOPER: "teamdeveloper",
+  BUSINESS_ANALYST: "businessanalyst"
 };
 
 /* =========================================================
-   GLOBAL SIDEBAR MENU
+   GLOBAL SIDEBAR MENU (🔥 PERBAIKAN: Hak akses Project Owner ditambahkan)
 ========================================================= */
 export const globalSidebarMenu = [
   {
@@ -41,26 +41,22 @@ export const globalSidebarMenu = [
       ROLES.SUPERADMIN,
       ROLES.ADMIN, 
       ROLES.TEAM_DEVELOPER,
-      ROLES.BUSINESS_ANALYST
+      ROLES.BUSINESS_ANALYST,
+      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini agar muncul di Dashboard luar
     ]
   },
-
-  /* 🏢 KHUSUS SUPERADMIN: Kelola Seluruh Tenant/Perusahaan SaaS */
   {
     label: "Perusahaan SaaS",
     path: "/companies",
     icon: Building2,
     roles: [ROLES.SUPERADMIN]
   },
-
-  /* 💳 KHUSUS SUPERADMIN: Tracker Billing & Invoice Global Platform */
   {
     label: "Billing Platform",
     path: "/billing-tracker",
     icon: Receipt,
     roles: [ROLES.SUPERADMIN]
   },
-
   {
     label: "Proyek",
     path: "/projects",
@@ -69,10 +65,10 @@ export const globalSidebarMenu = [
       ROLES.SUPERADMIN,
       ROLES.ADMIN, 
       ROLES.TEAM_DEVELOPER,
-      ROLES.BUSINESS_ANALYST
+      ROLES.BUSINESS_ANALYST,
+      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini agar bisa melihat daftar proyek
     ]
   },
-
   {
     label: "Kelola Karyawan",
     path: "/users",
@@ -82,8 +78,6 @@ export const globalSidebarMenu = [
       ROLES.ADMIN 
     ]
   },
-
-  /* 🧾 WORKSPACE BILLING: Pilihan Paket & Langganan milik Admin PT */
   {
     label: "Workspace Billing",
     path: "/billing",
@@ -93,15 +87,12 @@ export const globalSidebarMenu = [
       ROLES.ADMIN 
     ]
   },
-
-  /* 🛠️ KHUSUS SUPERADMIN: Integrasi Inti GitHub Aplikasi */
   {
     label: "GitHub Integrations",
     path: "/github-integrations",
     icon: CodeSquare,
     roles: [ROLES.SUPERADMIN]
   },
-
   {
     label: "Informasi Sistem",
     path: "/info",
@@ -110,10 +101,10 @@ export const globalSidebarMenu = [
       ROLES.SUPERADMIN,
       ROLES.ADMIN,
       ROLES.TEAM_DEVELOPER,
-      ROLES.BUSINESS_ANALYST
+      ROLES.BUSINESS_ANALYST,
+      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini jika diizinkan
     ]
   },
-
   {
     label: "Settings",
     path: "/settings",
@@ -122,13 +113,14 @@ export const globalSidebarMenu = [
       ROLES.SUPERADMIN,
       ROLES.ADMIN,
       ROLES.TEAM_DEVELOPER,
-      ROLES.BUSINESS_ANALYST
+      ROLES.BUSINESS_ANALYST,
+      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini agar bisa akses pengaturan profil/sistem
     ]
   }
 ];
 
 /* =========================================================
-   PROJECT DETAIL SIDEBAR MENU
+   PROJECT DETAIL SIDEBAR MENU (Sudah benar)
 ========================================================= */
 export const projectSidebarMenu = (projectId) => [
   {
@@ -246,19 +238,14 @@ export const projectSidebarMenu = (projectId) => [
 ];
 
 /* =========================================================
-   SIMPLE SIDEBAR MENU (Fallback / Minimalist View)
+   SIMPLE SIDEBAR MENU (Fallback)
 ========================================================= */
 export const sidebarMenu = [
   {
     label: "Dashboard",
     path: "/dashboard",
     icon: LayoutDashboard,
-    roles: [
-      ROLES.SUPERADMIN,
-      ROLES.ADMIN,
-      ROLES.TEAM_DEVELOPER,
-      ROLES.BUSINESS_ANALYST
-    ]
+    roles: [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.TEAM_DEVELOPER, ROLES.BUSINESS_ANALYST, ROLES.PROJECT_OWNER]
   },
   {
     label: "Perusahaan SaaS",
@@ -270,11 +257,7 @@ export const sidebarMenu = [
     label: "Proyek",
     path: "/projects",
     icon: FolderKanban,
-    roles: [
-      ROLES.SUPERADMIN,
-      ROLES.ADMIN,
-      ROLES.TEAM_DEVELOPER
-    ]
+    roles: [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.TEAM_DEVELOPER, ROLES.PROJECT_OWNER]
   },
   {
     label: "Pengguna",
@@ -286,11 +269,6 @@ export const sidebarMenu = [
     label: "Informasi Sistem",
     path: "/info",
     icon: Info,
-    roles: [
-      ROLES.SUPERADMIN,
-      ROLES.ADMIN,
-      ROLES.TEAM_DEVELOPER,
-      ROLES.BUSINESS_ANALYST
-    ]
+    roles: [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.TEAM_DEVELOPER, ROLES.BUSINESS_ANALYST, ROLES.PROJECT_OWNER]
   }
 ];

@@ -37,35 +37,43 @@ import BacklogPage from './pages/Backlogpage';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoutes';
 
-// ✅ FIX: Import AuthProvider agar AuthContext tersedia di seluruh app
+// ✅ Import AuthProvider agar AuthContext tersedia di seluruh app
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // ======================================================
 // 🛡️ FLEXIBLE ROLE BASED ROUTE GUARD
-// ✅ FIX: Ambil userRole dari AuthContext, bukan dari prop
+// ✅ FIX: Gabungkan deklarasi dan ambil state langsung dari useAuth()
 // ======================================================
 const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
+
+  // Tunggu sampai proses pembacaan token / localstorage selesai
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <p>Memverifikasi Hak Akses...</p>
+      </div>
+    );
+  }
+
   const userRole = user?.role?.toString().toLowerCase().replace(/\s+/g, '') || '';
 
   if (!allowedRoles.includes(userRole)) {
+    // Memberikan alert agar user tahu mengapa mereka dialihkan
+    alert(`Akses Ditolak! Anda tidak memiliki izin untuk halaman ini. (Role saat ini: ${userRole || 'Tidak Diketahui'})`);
     return <Navigate to="/dashboard" replace />;
   }
+  
   return children;
 };
 
 // ======================================================
-// ✅ FIX: Pisahkan Routes ke komponen sendiri agar bisa
-// menggunakan useAuth() di dalam AuthProvider
+// ✅ PISAHKAN ROUTES KE KOMPONEN MANDIRI
 // ======================================================
 function AppRoutes() {
-  // ✅ FIX: Hapus useState & setInterval — ambil user dari AuthContext saja
-  // setInterval setiap 1 detik adalah penyebab "Maximum update depth exceeded"
   const { user, loading } = useAuth();
 
-  const userRole = user?.role?.toString().toLowerCase().replace(/\s+/g, '') || '';
-
-  // Tunggu AuthContext selesai init, cegah blank screen saat refresh
+  // Tunggu AuthContext selesai inisialisasi, mencegah blank screen saat refresh
   if (loading) {
     return (
       <div style={{
@@ -92,7 +100,6 @@ function AppRoutes() {
       <Route path="/accept-invite" element={<AcceptInvite />} />
 
       {/* PROTECTED ROUTES */}
-      {/* ✅ FIX: MainLayout tidak perlu userData prop lagi, ambil sendiri via useAuth() */}
       <Route
         element={
           <ProtectedRoute>
@@ -152,7 +159,7 @@ function AppRoutes() {
         <Route
           path="/github-integrations"
           element={
-            <AllowedRolesRoute allowedRoles={['superadmin','teamdeveloper','businessanalyst']}>
+            <AllowedRolesRoute allowedRoles={['superadmin', 'teamdeveloper', 'businessanalyst']}>
               <GitHubIntegrations />
             </AllowedRolesRoute>
           }
@@ -183,7 +190,6 @@ function App() {
         '692937082573-r1udkbnlooteav7qhthhqnrl9s40vucd.apps.googleusercontent.com'
       }
     >
-      {/* ✅ FIX: AuthProvider membungkus Router agar semua komponen bisa useAuth() */}
       <AuthProvider>
         <Router>
           <AppRoutes />

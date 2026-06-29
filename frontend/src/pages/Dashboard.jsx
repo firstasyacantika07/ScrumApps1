@@ -11,8 +11,14 @@ import api from '../api/axios';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  
+  // 🌟 PERBAIKAN 1: Ambil data user langsung saat inisialisasi state agar tidak memicu re-render loop
+  const [userData, setUserData] = useState(() => {
+    const loggedInUser = localStorage.getItem('user');
+    return loggedInUser ? JSON.parse(loggedInUser) : null;
+  });
+  
   const [loading, setLoading] = useState(true);
-  const [userData, setUserData] = useState(null);
   
   // State manajemen data multi-role berbasis real database
   const [saasStats, setSaasStats] = useState({ total_revenue: 0, total_companies: 0, free_tier: 0, pro_tier: 0, enterprise_tier: 0 });
@@ -21,23 +27,19 @@ const Dashboard = () => {
   const [recentData, setRecentData] = useState([]);
 
   useEffect(() => {
-    let isMounted = true; // Proteksi state update pada unmounted component
+    // Jika tidak ada user di local storage, langsung tendang ke login
+    if (!userData) {
+      navigate('/login');
+      return;
+    }
+
+    let isMounted = true; 
 
     const fetchInitialData = async () => {
-      const loggedInUser = localStorage.getItem('user');
-      if (!loggedInUser) {
-        navigate('/login');
-        return;
-      }
-
       try {
-        const user = JSON.parse(loggedInUser);
-        if (isMounted) {
-          setUserData(user);
-          setLoading(true);
-        }
+        if (isMounted) setLoading(true);
         
-        const roleLower = user.role?.toString().toLowerCase().replace(/_/g, '') || '';
+        const roleLower = userData.role?.toString().toLowerCase().replace(/_/g, '') || '';
 
         // ======================================================
         // 👑 1. ROLE AKSES: SUPERADMIN (Global Platform Data)
@@ -100,7 +102,7 @@ const Dashboard = () => {
         } else {
           const [scrumStatsRes, taskRes] = await Promise.all([
             api.get('/projects/workspace/scrum/stats').catch(err => {
-              console.warn("Scrum stats route 500/404 handled safe:", err.message);
+              console.warn("Scrum stats route handled safe:", err.message);
               return { data: { data: { total_backlogs: 0, hold: 0, progress: 0, done: 0, late: 0, current_sprint: null } } };
             }),
             api.get('/projects').catch(err => {
@@ -133,9 +135,10 @@ const Dashboard = () => {
     fetchInitialData();
 
     return () => {
-      isMounted = false; // Bersihkan efek ketika beralih halaman
+      isMounted = false; 
     };
-  }, [navigate]);
+    // 🌟 PERBAIKAN 2: Kunci dependency array agar mengeksekusi fetch data hanya satu kali pas mount
+  }, [navigate, userData]);
 
   if (!userData || loading) return (
     <div className="flex h-screen items-center justify-center bg-[#f8fafc]">
@@ -156,7 +159,7 @@ const Dashboard = () => {
             Halo, {userData.name || userData.username || 'User'}! 👋
           </h2>
           <p className="text-slate-400 font-bold mt-1 uppercase text-[10px] tracking-[3px]">
-            Sistem Manajemen Scrum & Platform SaaS Terintegrated
+            Sistem Manajemen Scrum & Platform SaaS Terintegrasi
           </p>
         </div>
         <div className="px-4 py-2 bg-slate-100 rounded-full text-slate-600 text-[10px] font-black uppercase tracking-wider self-start sm:self-auto border border-slate-200">

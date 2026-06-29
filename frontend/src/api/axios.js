@@ -18,6 +18,8 @@ api.interceptors.request.use(
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    } else {
+      delete config.headers.Authorization;
     }
 
     // 3. Menyuntikkan X-Tenant-ID ke Header untuk Isolasi Data SaaS
@@ -30,11 +32,15 @@ api.interceptors.request.use(
     } else if (roleLower.includes('admin') || roleLower.includes('superadmin')) {
       // 🔥 FALLBACK: Jika Superadmin memiliki tenant_id NULL di DB, bypass otomatis dengan ID '1'
       config.headers['X-Tenant-ID'] = '1';
+    } else {
+      delete config.headers['X-Tenant-ID'];
     }
 
     // 4. Menyuntikkan X-Plan-ID untuk Validasi Paket Fitur di Backend
     if (user?.package_type || user?.plan_id) {
       config.headers['X-Plan-ID'] = user.package_type || user.plan_id;
+    } else {
+      delete config.headers['X-Plan-ID'];
     }
 
     return config;
@@ -54,6 +60,7 @@ api.interceptors.response.use(
   },
   (error) => {
     const originalRequest = error.config;
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
 
     // ✨ PENJINAKAN ERROR 409 CONFLICT (Kasus Webhook GitHub Duplikat)
     // 🔥 OPTIMASI: Ditambahkan .toLowerCase() agar deteksi kebal terhadap variasi penulisan endpoint URL
@@ -80,13 +87,17 @@ api.interceptors.response.use(
     }
 
     // 🔐 OTOMATIS LOGOUT JIKA TOKEN EXPIRED (Status 401)
-    if (error.response && error.response.status === 401) {
+    // 🔥 PERBAIKAN: Jangan usir user jika error 401 berasal dari proses login/auth itu sendiri atau jika user sudah di halaman login
+    const isAuthRequest = originalRequest.url && originalRequest.url.toLowerCase().includes('/auth');
+    
+    if (error.response && error.response.status === 401 && !isAuthRequest) {
       console.warn('🔥 Token tidak valid atau kedaluwarsa. Mengarahkan ke login...');
+      
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       
       // Maksa browser kembali ke login secara bersih jika tidak di dalam proses refresh token
-      if (!originalRequest._retry && typeof window !== 'undefined') {
+      if (!originalRequest._retry && typeof window !== 'undefined' && currentPath !== '/login') {
         // Gunakan replace agar user tidak terjebak dalam loop tombol "back" di browser
         window.location.replace('/login');
       }
