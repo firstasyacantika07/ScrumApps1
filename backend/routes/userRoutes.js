@@ -8,10 +8,26 @@ const invitationController = require('../controllers/invitationController');
 
 const { verifyToken } = require('../middleware/auth');
 
-// Melindungi semua rute di bawah ini dengan middleware autentikasi
+// =========================================================================
+// RUTE PUBLIK (TIDAK Memerlukan Login / JWT Token)
+// Calon pengguna baru mengakses rute ini dari tautan email mereka
+// =========================================================================
+
+// Menangani: GET /api/users/invitations/verify?token=xyz
+router.get('/invitations/verify', invitationController.verifyInvitation);
+
+// Menangani: POST /api/users/invitations/accept
+router.post('/invitations/accept', invitationController.acceptInvitation);
+
+
+// =========================================================================
+// MIDDLEWARE PROTEKSI
+// Semua rute di bawah baris ini wajib melampirkan JWT valid (Hanya untuk Admin/User terdaftar)
+// =========================================================================
 router.use(verifyToken);
 
-// ================= POST INVITE USER (FITUR BARU) =================
+
+// ================= POST INVITE USER =================
 // Menangani: POST /api/users/invitations
 router.post('/invitations', invitationController.inviteUser);
 
@@ -44,9 +60,8 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { name, email, password, role, phone_number, gender } = req.body;
-    const tenantId = req.user.tenant_id; // Pastikan user baru terikat dengan perusahaan sang admin
+    const tenantId = req.user.tenant_id; 
 
-    // Validasi input dasar untuk mencegah error MySQL NOT NULL
     if (!name || !email || !password || !role) {
       return res.status(400).json({
         success: false,
@@ -54,7 +69,6 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Cek apakah email sudah terpakai di database
     const [existing] = await db.query('SELECT id FROM tbr_users WHERE email = ?', [email]);
     if (existing.length > 0) {
       return res.status(400).json({
@@ -78,7 +92,6 @@ router.post('/', async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE USER BACKEND CRASH:", err);
-    // 💡 Mengubah objek key 'error' menjadi 'message' agar dibaca mulus oleh alert Axios Frontend Anda
     res.status(500).json({ 
       success: false,
       message: err.message || "Gagal membuat user baru akibat gangguan server." 
@@ -105,7 +118,6 @@ router.put('/:id', async (req, res) => {
       params.push(hash);
     }
 
-    // Proteksi tambahan: Pastikan hanya bisa mengupdate user di tenant yang sama
     query += ` WHERE id=? AND tenant_id=?`;
     params.push(req.params.id, tenantId);
 
@@ -133,12 +145,11 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// ================= DELETE USER =================
+// ================= DELETE / REVOKE USER =================
 router.delete('/:id', async (req, res) => {
   try {
     const tenantId = req.user.tenant_id;
 
-    // Proteksi tambahan: Pastikan tidak bisa menghapus user dari tenant lain
     const [result] = await db.query('DELETE FROM tbr_users WHERE id=? AND tenant_id=?', [req.params.id, tenantId]);
     
     if (result.affectedRows === 0) {

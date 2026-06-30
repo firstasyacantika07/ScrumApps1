@@ -45,9 +45,8 @@ router.get("/me", verifyToken, (req, res, next) => {
 // ✉️ INVITATION ROUTES (WORKSPACE COLLABORATION)
 // ======================================================
 
-// Rute Publik untuk memproses token undangan (Baris 53 aman)
-// Di dalam routes/authRoutes.js Anda bisa tulis sesederhana ini sekarang:
-router.get('/invitations/verify', invitationController.verifyTokenRoute); 
-router.post('/invitations/accept', invitationController.acceptInvite);
+// 🛠️ PERBAIKAN: Nama fungsi disesuaikan dengan yang di-export oleh invitationController
+router.get('/invitations/verify', invitationController.verifyInvitation); 
+router.post('/invitations/accept', invitationController.acceptInvitation);
 
 module.exports = router;

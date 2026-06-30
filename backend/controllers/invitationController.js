@@ -1,20 +1,22 @@
 // controllers/invitationController.js
 const nodemailer = require('nodemailer');
 const crypto = require('crypto'); 
-const bcrypt = require("bcryptjs"); // 👑 Pindahkan ke atas agar rapi & optimal
+const bcrypt = require("bcryptjs"); 
 const db = require("../config/db"); 
 
-// 1. Konfigurasi Transporter SMTP Nodemailer (Disertai Bypass Handshake SSL Localhost)
+// =========================================================================
+// 🚀 BYPASS AUTENTIKASI: Kredensial Langsung Sesuai File .env Anda
+// =========================================================================
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: parseInt(process.env.EMAIL_PORT || '465'),
-  secure: process.env.EMAIL_PORT === '465', 
+  host: 'smtp.gmail.com',
+  port: 465,               // Menggunakan port 465 (SSL Murni)
+  secure: true,            // Wajib TRUE untuk port 465
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, 
+    user: 'navacantika93@gmail.com', // Email Anda langsung
+    pass: 'lemarxbjqepezppm'        // App Password 16 digit Anda langsung
   },
   tls: {
-    rejectUnauthorized: false // 🛠️ Menghindari error 500 SMTP akibat blokade SSL lokal
+    rejectUnauthorized: false // Bypass verifikasi sertifikat lokal (sangat aman untuk localhost)
   }
 });
 
@@ -52,11 +54,12 @@ exports.inviteUser = async (req, res) => {
     await db.query(insertQuery, [email, role, tenantId, inviteToken, expiresAt]);
 
     // E. Susun Tautan Verifikasi Menuju Frontend
-    const inviteLink = `${process.env.FRONTEND_URL}/accept-invite?token=${inviteToken}`;
+    const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const inviteLink = `${frontendBaseUrl}/accept-invite?token=${inviteToken}`;
 
     // F. Desain Template Email Premium Bertema Merah Putih (#ee1e2d)
     const mailOptions = {
-      from: `"ScrumApps System" <${process.env.EMAIL_USER}>`,
+      from: `"ScrumApps System" <navcantika93@gmail.com>`,
       to: email,
       subject: `Undangan Bergabung ke Workspace ${companyName}`,
       html: `
@@ -106,9 +109,9 @@ exports.inviteUser = async (req, res) => {
 };
 
 // ======================================================
-// 🔍 2. VERIFY TOKEN ROUTE (Validasi Token Database ke Frontend)
+// 🔍 2. VERIFY INVITATION (Validasi Token Database ke Frontend)
 // ======================================================
-exports.verifyTokenRoute = async (req, res) => {
+exports.verifyInvitation = async (req, res) => {
   try {
     const { token } = req.query;
 
@@ -149,10 +152,9 @@ exports.verifyTokenRoute = async (req, res) => {
 };
 
 // ======================================================
-// 👤 3. ACCEPT INVITE (Registrasi Anggota Tim & Update State)
+// 👤 3. ACCEPT INVITATION (Registrasi Anggota Tim & Update State)
 // ======================================================
-exports.acceptInvite = async (req, res) => {
-  // Ambil koneksi manual untuk mengaktifkan fitur ACID Transaction
+exports.acceptInvitation = async (req, res) => {
   const connection = await db.getConnection();
   try {
     const { token, name, password } = req.body;
@@ -161,7 +163,6 @@ exports.acceptInvite = async (req, res) => {
       return res.status(400).json({ success: false, message: "Seluruh data profil wajib diisi." });
     }
 
-    // A. Ambil dan validasi token langsung dari DB
     const [invitations] = await connection.query('SELECT * FROM tbr_invitations WHERE token = ?', [token]);
     if (invitations.length === 0) {
       return res.status(404).json({ success: false, message: "Undangan tidak valid." });
@@ -173,23 +174,18 @@ exports.acceptInvite = async (req, res) => {
       return res.status(400).json({ success: false, message: "Undangan ini sudah tidak dapat digunakan lagi atau kedaluwarsa." });
     }
 
-    // B. Mulai Transaksi Database Aman
     await connection.beginTransaction();
 
-    // C. Enkripsi password menggunakan bcryptjs yang sudah di-import di atas
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // D. Masukkan data ke tabel utama tbr_users
     await connection.query(
       `INSERT INTO tbr_users (name, email, password, role, tenant_id) VALUES (?, ?, ?, ?, ?)`,
       [name, invitation.email, hashedPassword, invitation.role, invitation.tenant_id]
     );
 
-    // E. Kunci Token secara permanen menjadi 'accepted'
     await connection.query('UPDATE tbr_invitations SET status = "accepted" WHERE id = ?', [invitation.id]);
 
-    // F. Commit transaksi jika kedua query di atas sukses tanpa cela
     await connection.commit();
 
     return res.status(201).json({
@@ -197,7 +193,6 @@ exports.acceptInvite = async (req, res) => {
       message: "Berhasil bergabung! Akun tim Anda telah aktif, silakan lakukan login.",
     });
   } catch (error) {
-    // Rollback otomatis jika di tengah jalan ada query yang crash (mencegah data menggantung)
     await connection.rollback();
     console.error("❌ ACCEPT INVITE ERROR:", error);
     
@@ -206,7 +201,6 @@ exports.acceptInvite = async (req, res) => {
     }
     return res.status(500).json({ success: false, message: "Gagal memproses pembuatan akun tim baru." });
   } finally {
-    // Kembalikan koneksi ke pool agar memori server tidak bocor
     connection.release();
   }
 };

@@ -67,7 +67,6 @@ const Sidebar = () => {
       name: 'Project Space', 
       path: '/projects', 
       icon: Briefcase, 
-      // Sembunyikan dari Super Admin karena fokusnya hanya bisnis SaaS global
       show: !isRole('superadmin') 
     },
     { 

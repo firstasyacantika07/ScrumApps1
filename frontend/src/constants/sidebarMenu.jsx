@@ -30,7 +30,7 @@ export const ROLES = {
 };
 
 /* =========================================================
-   GLOBAL SIDEBAR MENU (🔥 PERBAIKAN: Hak akses Project Owner ditambahkan)
+   GLOBAL SIDEBAR MENU 
 ========================================================= */
 export const globalSidebarMenu = [
   {
@@ -42,7 +42,7 @@ export const globalSidebarMenu = [
       ROLES.ADMIN, 
       ROLES.TEAM_DEVELOPER,
       ROLES.BUSINESS_ANALYST,
-      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini agar muncul di Dashboard luar
+      ROLES.PROJECT_OWNER 
     ]
   },
   {
@@ -66,7 +66,7 @@ export const globalSidebarMenu = [
       ROLES.ADMIN, 
       ROLES.TEAM_DEVELOPER,
       ROLES.BUSINESS_ANALYST,
-      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini agar bisa melihat daftar proyek
+      ROLES.PROJECT_OWNER 
     ]
   },
   {
@@ -102,7 +102,7 @@ export const globalSidebarMenu = [
       ROLES.ADMIN,
       ROLES.TEAM_DEVELOPER,
       ROLES.BUSINESS_ANALYST,
-      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini jika diizinkan
+      ROLES.PROJECT_OWNER 
     ]
   },
   {
@@ -114,7 +114,7 @@ export const globalSidebarMenu = [
       ROLES.ADMIN,
       ROLES.TEAM_DEVELOPER,
       ROLES.BUSINESS_ANALYST,
-      ROLES.PROJECT_OWNER // 🔥 Tambahkan ini agar bisa akses pengaturan profil/sistem
+      ROLES.PROJECT_OWNER 
     ]
   }
 ];
