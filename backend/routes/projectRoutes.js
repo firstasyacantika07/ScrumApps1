@@ -137,8 +137,8 @@ router.delete('/:projectId/developments/:devId', authorize(['superadmin', 'admin
     👁️ VISION BOARD ROUTES
    ===================================================== */
 router.get('/:projectId/vision-boards', projectController.getProjectVisions);
-router.post('/:projectId/vision-boards', authorize(['superadmin', 'admin', 'projectowner']), projectController.createVision);
-router.put('/:projectId/vision-boards/:id', authorize(['superadmin', 'admin', 'projectowner']), projectController.updateVision); 
+router.post('/:projectId/vision-boards', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), projectController.createVision);
+router.put('/:projectId/vision-boards/:id', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), projectController.updateVision); 
 router.delete('/:projectId/vision-boards/:id', authorize(['superadmin', 'admin', 'projectowner']), projectController.deleteVision); 
 
 

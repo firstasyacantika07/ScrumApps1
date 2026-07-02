@@ -37,8 +37,19 @@ exports.createCheckout = async (req, res) => {
     try {
         const { plan, amount, isAnnual = false } = req.body;
 
+        // 🔒 WAJIB ADA tenant_id -- tanpa ini webhook nanti tidak tahu tenant mana yang harus
+        // di-upgrade, dan berakhir sebagai bug "subscription masuk tapi tenant ga masuk"
+        const tenantId = req.user.tenant_id;
+        if (!tenantId) {
+            return res.status(400).json({
+                success: false,
+                message: "Tenant ID tidak ditemukan pada sesi Anda. Silakan login ulang."
+            });
+        }
+
         console.log('🧾 Checkout Request:', { 
             userId: req.user.id, 
+            tenantId,
             plan, 
             amount, 
             isAnnual 
@@ -90,12 +101,15 @@ exports.createCheckout = async (req, res) => {
         const transaction = await snap.createTransaction(parameter);
         
         // Simpan log invoice dengan status awal 'pending'
+        // ⚠️ tenant_id WAJIB disimpan di sini agar webhook (yang tidak punya req.user) tahu
+        // tenant mana yang harus di-upgrade saat pembayaran sukses.
         await db.query(
             `INSERT INTO transactions (
-                user_id, order_id, snap_token, amount, plan, is_annual, status
-            ) VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+                user_id, tenant_id, order_id, snap_token, amount, plan, is_annual, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
             [
                 req.user.id, 
+                tenantId,
                 parameter.transaction_details.order_id, 
                 transaction.token, 
                 finalAmount, 
@@ -183,16 +197,40 @@ exports.handleMidtransWebhook = async (req, res) => {
             transaction_status === 'settlement' || 
             (transaction_status === 'capture' && fraud_status === 'accept');
 
-        // 🔥 PROSES AKTIVASI PAKET & SINKRONISASI KE TABEL tbr_users
+        // 🔥 PROSES AKTIVASI PAKET & SINKRONISASI KE TABEL tbr_tenants (sumber kebenaran utama) + tbr_users
         if (isPaymentSuccess) {
             const days = transaction.is_annual ? 365 : 30;
             const planDurationText = transaction.is_annual ? 'Tahunan' : 'Bulanan';
-            
-            // Update package_type di tbr_users agar sinkron dengan limitasi projectController
+            const billingCycle = transaction.is_annual ? 'YEARLY' : 'MONTHLY';
+
+            if (!transaction.tenant_id) {
+                // Transaksi lama sebelum kolom tenant_id ditambahkan, atau checkout tidak menyertakan tenant_id.
+                // Tetap fallback update tbr_users supaya user tidak dirugikan, tapi tenant TIDAK ikut ter-upgrade.
+                console.warn(`⚠️ Transaction ${order_id} tidak punya tenant_id. Tenant TIDAK ikut di-upgrade.`);
+            } else {
+                // 🔴 SUMBER KEBENARAN UTAMA: UPDATE tbr_tenants
+                // Ini yang membuat "kelola perusahaan" ter-update dan semua admin/superadmin
+                // di tenant yang sama langsung sinkron -- bukan cuma user yang checkout.
+                await db.query(
+                    `UPDATE tbr_tenants SET 
+                        package_type = ?, 
+                        billing_cycle = ?,
+                        subscription_status = 'active',
+                        is_trial = 0,
+                        subscription_ends_at = DATE_ADD(NOW(), INTERVAL ? DAY),
+                        updated_at = NOW()
+                     WHERE id = ?`,
+                    [transaction.plan, billingCycle, days, transaction.tenant_id]
+                );
+            }
+
+            // Update package_type di tbr_users juga -- untuk kompatibilitas kode lama
+            // (mis. projectController) yang mungkin masih baca dari tbr_users, bukan tbr_tenants.
             await db.query(
                 `UPDATE tbr_users SET 
                     package_type = ?, 
                     subscription_status = 'active',
+                    is_trial = 0,
                     subscription_ends_at = DATE_ADD(NOW(), INTERVAL ? DAY)
                  WHERE id = ?`,
                 [transaction.plan, days, transaction.user_id]
@@ -206,6 +244,7 @@ exports.handleMidtransWebhook = async (req, res) => {
 
             console.log('🎉 Subscription SUCCESSFULLY ACTIVATED:', {
                 user_id: transaction.user_id,
+                tenant_id: transaction.tenant_id,
                 plan: transaction.plan,
                 order_id: order_id
             });

@@ -60,6 +60,10 @@ const ProjectList = () => {
   
   // VALIDASI ROLE: Diproteksi dengan String() agar aman dari error .toUpperCase()
   const isSuperAdmin = String(userData?.role || "").toUpperCase() === "SUPERADMIN";
+  // ✨ FIX BUG #1: Backend menjadikan SUPERADMIN read-only untuk semua project actions
+  // (create/update = 403, delete cuma untuk role ADMIN). Frontend sebelumnya salah
+  // memakai isSuperAdmin untuk gating tombol Create/Edit/Delete, seharusnya isAdmin.
+  const isAdmin = String(userData?.role || "").toUpperCase() === "ADMIN";
 
   // Aturan Batasan Pembuatan Project Baru
   const projectLimit = 1;
@@ -115,8 +119,8 @@ const ProjectList = () => {
   // ACTIONS
   // ==========================
   const openCreate = () => {
-    if (!isSuperAdmin) {
-      showToast("Akses Ditolak: Hanya Superadmin yang dapat membuat proyek baru", "error");
+    if (!isAdmin) {
+      showToast("Akses Ditolak: Hanya Admin yang dapat membuat proyek baru", "error");
       return;
     }
     if (hasExpiredTrial) {
@@ -137,8 +141,8 @@ const ProjectList = () => {
 
   const handleEdit = (e, project) => {
     e.stopPropagation();
-    if (!isSuperAdmin) {
-      showToast("Akses Ditolak: Hanya Superadmin yang dapat mengedit proyek", "error");
+    if (!isAdmin) {
+      showToast("Akses Ditolak: Hanya Admin yang dapat mengedit proyek", "error");
       return;
     }
     setSelectedId(project.id);
@@ -153,7 +157,7 @@ const ProjectList = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!isSuperAdmin) {
+    if (!isAdmin) {
       showToast("Akses Ditolak: Anda tidak memiliki hak memproses data ini", "error");
       return;
     }
@@ -186,8 +190,8 @@ const ProjectList = () => {
 
   const handleDelete = async (e, id) => {
     e.stopPropagation();
-    if (!isSuperAdmin) {
-      showToast("Akses Ditolak: Hanya Superadmin yang dapat menghapus proyek", "error");
+    if (!isAdmin) {
+      showToast("Akses Ditolak: Hanya Admin yang dapat menghapus proyek", "error");
       return;
     }
     const ok = window.confirm("Hapus project ini secara permanen?");
@@ -294,7 +298,7 @@ const ProjectList = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               
               {/* BUTTON CARD */}
-              {isSuperAdmin && (
+              {isAdmin && (
                 <div className={`border border-gray-200 rounded-3xl h-[240px] flex flex-col items-center justify-center transition-all ${reachedLimit ? "bg-amber-50/50 border-amber-200 border-dashed" : "bg-white"}`}>
                   <h3 className="text-xl font-semibold mb-6">Buat Proyek Baru</h3>
                   <button
@@ -329,7 +333,7 @@ const ProjectList = () => {
                   className="bg-white border border-gray-200 rounded-3xl overflow-hidden cursor-pointer hover:shadow-lg transition flex flex-col justify-between h-[240px]"
                 >
                   <div className="bg-red-50 h-16 relative">
-                    {isSuperAdmin && (
+                    {isAdmin && (
                       <button
                         onClick={(e) => handleDelete(e, project.id)}
                         className="absolute top-3 left-3 w-8 h-8 bg-red-500 text-white rounded-lg flex items-center justify-center shadow hover:bg-red-600 transition"
@@ -359,7 +363,7 @@ const ProjectList = () => {
                         {project.status === 'on_progress' ? 'progress' : project.status}
                       </span>
                       
-                      {isSuperAdmin && (
+                      {isAdmin && (
                         <button
                           onClick={(e) => handleEdit(e, project)}
                           className="flex items-center gap-1 text-red-500 font-semibold text-xs hover:text-red-600 transition"

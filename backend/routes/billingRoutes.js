@@ -8,8 +8,30 @@ const paymentController = require('../controllers/paymentController');
 // Middleware auth
 const { verifyToken, authorize } = require('../middleware/auth');
 
+// ======================================================
+// 🌐 WEBHOOK MIDTRANS (PUBLIC — HARUS SEBELUM router.use(verifyToken)!)
+// ======================================================
 /**
- * 🔒 SEMUA ROUTE BILLING WAJIB LOGIN
+ * ⚠️ FIX: sebelumnya diarahkan ke subscriptionController.handleMidtransWebhook, yang
+ * baca dari tabel `transactions` -- tabel yang TIDAK PERNAH ditulis oleh alur checkout
+ * (createPayment/createCheckoutSession keduanya nulis ke tbr_payments). Akibatnya webhook
+ * itu selalu gagal cari order ("not found") dan tbr_tenants tidak pernah ter-update.
+ *
+ * SEKARANG: diarahkan ke paymentController.handleMidtransWebhook, yang baca dari
+ * tbr_payments (tabel yang benar) dan mem-propagate ke tbr_subscriptions + tbr_tenants + tbr_users.
+ *
+ * ⚠️ PENTING: route ini WAJIB tetap di atas router.use(verifyToken) di bawah.
+ * Midtrans memanggil endpoint ini server-to-server TANPA JWT/Bearer token user,
+ * jadi kalau ikut kena verifyToken, notifikasi akan selalu ditolak 401 dan
+ * tbr_tenants tidak akan pernah ter-update walau transaksi sukses di Midtrans.
+ *
+ * Endpoint: POST /api/workspace/billing/webhook
+ * (sesuaikan path ini dengan "Payment Notification URL" di dashboard Midtrans kamu)
+ */
+router.post('/webhook', paymentController.handleMidtransWebhook);
+
+/**
+ * 🔒 SEMUA ROUTE BILLING DI BAWAH INI WAJIB LOGIN
  * Menjaga semua endpoint di bawah ini agar hanya bisa diakses user terautentikasi
  */
 router.use(verifyToken);
@@ -33,9 +55,17 @@ router.get("/status", async (req, res) => {
             });
         }
 
-        // 1. Ambil informasi dasar tenant/perusahaan
+        // 1. Ambil informasi tenant/perusahaan BESERTA data langganan langsung dari DB
+        //    ⚠️ SEBELUMNYA: package_type/billing_cycle diambil dari req.user (isi JWT token),
+        //    yang basi kalau token belum di-refresh sejak terakhir beli paket. Ini penyebab
+        //    "subscription admin baru belum termuat di dashboard" & "admin/superadmin ga sinkron",
+        //    karena setiap admin di tenant yang sama bisa punya JWT dengan snapshot data berbeda-beda.
+        //    SEKARANG: selalu query fresh ke tbr_tenants, jadi SEMUA admin di tenant yang sama
+        //    otomatis melihat data yang sama & real-time.
         const [tenantRows] = await db.query(
-            `SELECT id, company_name FROM tbr_tenants WHERE id = ?`, 
+            `SELECT id, company_name, package_type, billing_cycle, subscription_status,
+                    trial_end, subscription_ends_at
+             FROM tbr_tenants WHERE id = ?`, 
             [tenantId]
         );
 
@@ -48,11 +78,11 @@ router.get("/status", async (req, res) => {
 
         const tenant = tenantRows[0];
 
-        // 2. Ambil data langganan dari object user (session/token)
-        const packageType = (req.user.package_type || 'FREE').toUpperCase();
-        const billingCycle = req.user.billing_cycle || 'NONE';
-        const trialEnd = req.user.trial_end;
-        const subscriptionEndsAt = req.user.subscription_ends_at;
+        // 2. Ambil data langganan dari tenant (bukan dari JWT lagi)
+        const packageType = (tenant.package_type || 'FREE').toUpperCase();
+        const billingCycle = tenant.billing_cycle || 'NONE';
+        const trialEnd = tenant.trial_end;
+        const subscriptionEndsAt = tenant.subscription_ends_at;
 
         // 3. Hitung sisa hari aktif langganan
         let remainingDays = 0;

@@ -443,7 +443,20 @@ const BusinessAnalystView = ({ scrumStats, recentProjects, navigate }) => {
                 <span>Susun Prioritas Backlog (Drag-Drop)</span>
                 <ChevronRight size={16} className="text-slate-400" />
               </div>
-              <div onClick={() => navigate('/vision')} className="p-4 rounded-xl border bg-slate-50 hover:bg-white transition-all cursor-pointer text-xs font-black text-slate-700 flex items-center justify-between">
+              <div
+                onClick={() => {
+                  // 🛠️ FIX: '/vision' bukan route yang ada — Vision Board bersarang
+                  // per-project di ProjectDetail (/projects/:id/vision-board).
+                  // Arahkan ke project terbaru milik BA; kalau belum ada project sama sekali,
+                  // arahkan ke daftar project (pola sama seperti tombol "Buat & Mulai Sprint Baru").
+                  if (recentProjects.length > 0) {
+                    navigate(`/projects/${recentProjects[0].id}/vision-board`);
+                  } else {
+                    navigate('/projects');
+                  }
+                }}
+                className="p-4 rounded-xl border bg-slate-50 hover:bg-white transition-all cursor-pointer text-xs font-black text-slate-700 flex items-center justify-between"
+              >
                 <span>Input & Perbarui Visi Proyek (Vision Board)</span>
                 <ChevronRight size={16} className="text-slate-400" />
               </div>

@@ -139,7 +139,6 @@ exports.getProjects = async (req, res) => {
             sql = `
                 SELECT p.*, tnt.package_type as tenant_package_type 
                 FROM tbr_projects p 
-                INNER JOIN tnt = tnt.id
                 INNER JOIN tbr_tenants tnt ON p.tenant_id = tnt.id
                 LEFT JOIN tbr_project_members pm ON p.id = pm.project_id 
                 WHERE p.tenant_id = ? AND (p.user_id = ? OR pm.user_id = ?) 
@@ -659,8 +658,8 @@ exports.createVision = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
         const { name, vision, target_group, needs, products, business_goals, competitors } = req.body;
         
-        if (userRole !== 'projectowner' && userRole !== 'admin') {
-            return res.status(403).json({ message: "Akses Ditolak: Penyusunan visi awal proyek adalah tanggung jawab Project Owner." });
+        if (!['projectowner', 'admin', 'businessanalyst'].includes(userRole)) {
+            return res.status(403).json({ message: "Akses Ditolak: Penyusunan visi awal proyek adalah tanggung jawab Project Owner atau Business Analyst." });
         }
 
         const [projectCheck] = await db.query(`SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);

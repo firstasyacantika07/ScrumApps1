@@ -1,5 +1,6 @@
 const db = require("../config/db");
 const midtransClient = require("midtrans-client");
+const crypto = require("crypto");
 
 // ======================================================
 // MIDTRANS CONFIG
@@ -41,6 +42,15 @@ exports.createPayment = async (req, res) => {
       });
     }
 
+    // 🔒 WAJIB ADA tenant_id -- tanpa ini webhook tidak akan tahu tenant mana yang harus diupdate
+    const tenantId = req.user.tenant_id;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: "Tenant ID tidak ditemukan pada sesi Anda. Silakan login ulang.",
+      });
+    }
+
     const targetPlanId = Number(planId);
 
     const [plans] = await db.query(
@@ -77,13 +87,20 @@ exports.createPayment = async (req, res) => {
 
     const transaction = await snap.createTransaction(parameter);
 
+    // ⚠️ CATATAN SCHEMA: kolom tenant_id & billing_cycle di tbr_payments dipakai oleh
+    // handleMidtransWebhook untuk tahu tenant mana & durasi apa yang harus diaktifkan.
+    // Kalau tabel tbr_payments belum punya kolom ini, jalankan dulu:
+    //   ALTER TABLE tbr_payments ADD COLUMN tenant_id INT NULL;
+    //   ALTER TABLE tbr_payments ADD COLUMN billing_cycle VARCHAR(20) NULL;
+    // package_type di sini diasumsikan harus sama persis dengan nilai yang dipakai
+    // tbr_tenants.package_type (mis. "PRO"). Sesuaikan plan.name / plan.type kalau berbeda.
     await db.query(
       `
       INSERT INTO tbr_payments 
-        (user_id, order_id, amount, payment_status, package_type, created_at)
-      VALUES (?, ?, ?, ?, ?, NOW())
+        (user_id, tenant_id, order_id, amount, payment_status, package_type, billing_cycle, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
       `,
-      [req.user.id, orderId, amount, "PENDING", plan.name]
+      [req.user.id, tenantId, orderId, amount, "PENDING", plan.name, cycle]
     );
 
     return res.status(200).json({
@@ -108,7 +125,7 @@ exports.createPayment = async (req, res) => {
 // ======================================================
 exports.createCheckoutSession = async (req, res) => {
   try {
-    const { planId, amount, planName, paymentMethod } = req.body;
+    const { planId, amount, planName, paymentMethod, billingCycle } = req.body;
 
     if (!req.user || !req.user.id) {
       return res.status(401).json({
@@ -123,6 +140,17 @@ exports.createCheckoutSession = async (req, res) => {
         message: "Plan, amount, planName dan paymentMethod wajib diisi",
       });
     }
+
+    // 🔒 WAJIB ADA tenant_id -- tanpa ini webhook tidak akan tahu tenant mana yang harus diupdate
+    const tenantId = req.user.tenant_id;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: "Tenant ID tidak ditemukan pada sesi Anda. Silakan login ulang.",
+      });
+    }
+
+    const cycle = billingCycle ? billingCycle.toUpperCase() : "MONTHLY";
 
     const orderId = `TRX-${Date.now()}`;
 
@@ -170,20 +198,23 @@ exports.createCheckoutSession = async (req, res) => {
 
     const chargeResponse = await coreApi.charge(parameter);
 
+    // ⚠️ Sama seperti createPayment: pastikan kolom tenant_id & billing_cycle sudah ada di tbr_payments.
     await db.query(
       `
       INSERT INTO tbr_payments 
-        (user_id, order_id, transaction_id, amount, payment_method, payment_status, package_type, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+        (user_id, tenant_id, order_id, transaction_id, amount, payment_method, payment_status, package_type, billing_cycle, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         req.user.id,
+        tenantId,
         orderId,
         chargeResponse.transaction_id || null,
         amount,
         paymentMethod,
         "PENDING",
         planName,
+        cycle,
       ]
     );
 
@@ -229,12 +260,196 @@ exports.checkPaymentStatus = async (req, res) => {
 };
 
 // ======================================================
+// 3b. MIDTRANS WEBHOOK (Server-to-Server Notification)
+//     Ini satu-satunya tempat yang boleh mengubah status "sukses" jadi
+//     aktivasi paket. Baca dari tbr_payments (tabel yang benar-benar
+//     dipakai createPayment/createCheckoutSession), lalu propagate ke
+//     tbr_subscriptions + tbr_tenants + tbr_users -- sama seperti activatePlan.
+// ======================================================
+exports.handleMidtransWebhook = async (req, res) => {
+  try {
+    const notification = req.body;
+    const {
+      order_id,
+      status_code,
+      gross_amount,
+      signature_key,
+      transaction_status,
+      fraud_status,
+      transaction_id,
+      payment_type,
+    } = notification;
+
+    if (!order_id || !status_code || !gross_amount || !signature_key) {
+      return res.status(400).json({ success: false, message: "Payload notifikasi tidak lengkap" });
+    }
+
+    // 1. Verifikasi signature_key -- WAJIB, supaya endpoint ini tidak bisa dipalsukan
+    //    dari luar untuk mengaktifkan paket gratis.
+    const expectedSignature = crypto
+      .createHash("sha512")
+      .update(`${order_id}${status_code}${gross_amount}${process.env.MIDTRANS_SERVER_KEY}`)
+      .digest("hex");
+
+    if (expectedSignature !== signature_key) {
+      console.warn("WEBHOOK SIGNATURE MISMATCH:", order_id);
+      return res.status(401).json({ success: false, message: "Signature tidak valid" });
+    }
+
+    // 2. Ambil order dari tbr_payments -- ini tabel yang benar (bukan tabel `transactions`)
+    const [payments] = await db.query(
+      `SELECT * FROM tbr_payments WHERE order_id = ?`,
+      [order_id]
+    );
+
+    if (!payments || payments.length === 0) {
+      console.warn("WEBHOOK: order_id tidak ditemukan di tbr_payments:", order_id);
+      // Tetap balas 200 supaya Midtrans tidak retry terus untuk order yang memang tidak dikenal
+      return res.status(200).json({ success: false, message: "Order tidak ditemukan" });
+    }
+
+    const payment = payments[0];
+
+    // 3. Idempotency guard -- webhook Midtrans bisa terkirim lebih dari sekali untuk status yang sama
+    if (payment.payment_status === "SUCCESS" || payment.payment_status === "SETTLEMENT") {
+      return res.status(200).json({ success: true, message: "Order sudah diproses sebelumnya" });
+    }
+
+    const isSuccess =
+      transaction_status === "settlement" ||
+      (transaction_status === "capture" && fraud_status === "accept");
+
+    const isFailed = ["deny", "cancel", "expire", "failure"].includes(transaction_status);
+
+    if (isFailed) {
+      await db.query(
+        `UPDATE tbr_payments SET payment_status = ?, transaction_id = ?, updated_at = NOW() WHERE order_id = ?`,
+        [transaction_status.toUpperCase(), transaction_id || payment.transaction_id, order_id]
+      );
+      return res.status(200).json({ success: true, message: "Status kegagalan dicatat" });
+    }
+
+    if (!isSuccess) {
+      // pending / lainnya -- catat status apa adanya, jangan aktivasi apapun dulu
+      await db.query(
+        `UPDATE tbr_payments SET payment_status = ?, transaction_id = ?, updated_at = NOW() WHERE order_id = ?`,
+        [String(transaction_status || "PENDING").toUpperCase(), transaction_id || payment.transaction_id, order_id]
+      );
+      return res.status(200).json({ success: true, message: "Status pending dicatat" });
+    }
+
+    // ================= PEMBAYARAN SUKSES =================
+    const tenantId = payment.tenant_id;
+    const userId = payment.user_id;
+    const packageType = payment.package_type; // ⚠️ pastikan nilainya konsisten dgn tbr_tenants.package_type
+    const cycle = (payment.billing_cycle || "MONTHLY").toUpperCase();
+
+    if (!tenantId) {
+      // Payment lama (sebelum kolom tenant_id ditambahkan) tidak akan punya ini.
+      console.error("WEBHOOK: payment sukses tapi tanpa tenant_id, tidak bisa aktivasi otomatis:", order_id);
+      await db.query(
+        `UPDATE tbr_payments SET payment_status = 'SUCCESS', transaction_id = ?, updated_at = NOW() WHERE order_id = ?`,
+        [transaction_id || payment.transaction_id, order_id]
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Pembayaran dicatat sukses, tapi tenant_id kosong -- aktivasi manual diperlukan",
+      });
+    }
+
+    const startDate = new Date();
+    const endDate = new Date();
+    if (cycle === "YEARLY") {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    } else {
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
+    const mysqlStart = formatToMySQLDateTime(startDate);
+    const mysqlEnd = formatToMySQLDateTime(endDate);
+
+    // 4. Tandai payment SUCCESS
+    await db.query(
+      `UPDATE tbr_payments SET payment_status = 'SUCCESS', transaction_id = ?, updated_at = NOW() WHERE order_id = ?`,
+      [transaction_id || payment.transaction_id, order_id]
+    );
+
+    // 5. Expire subscription lama utk tenant ini, lalu catat subscription baru
+    try {
+      await db.query(`UPDATE tbr_subscriptions SET status = 'EXPIRED' WHERE tenant_id = ?`, [tenantId]);
+    } catch (e) {
+      console.warn("Skip expire tbr_subscriptions:", e.message);
+    }
+
+    try {
+      await db.query(
+        `
+        INSERT INTO tbr_subscriptions
+          (tenant_id, user_id, package_type, billing_cycle, start_date, end_date, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        `,
+        [tenantId, userId, packageType, cycle, mysqlStart, mysqlEnd, "ACTIVE"]
+      );
+    } catch (e) {
+      console.warn("Skip insert tbr_subscriptions:", e.message);
+    }
+
+    // 6. 🔴 SUMBER KEBENARAN UTAMA: UPDATE tbr_tenants
+    await db.query(
+      `
+      UPDATE tbr_tenants
+      SET
+        package_type = ?,
+        billing_cycle = ?,
+        subscription_status = 'active',
+        subscription_ends_at = ?,
+        is_trial = 0,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [packageType, cycle, mysqlEnd, tenantId]
+    );
+
+    // 7. UPDATE tbr_users -- kompatibilitas kode lama
+    await db.query(
+      `
+      UPDATE tbr_users
+      SET
+        package_type = ?,
+        billing_cycle = ?,
+        subscription_status = 'active',
+        subscription_ends_at = ?,
+        is_trial = 0,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [packageType, cycle, mysqlEnd, userId]
+    );
+
+    return res.status(200).json({ success: true, message: "Webhook diproses, paket aktif" });
+
+  } catch (error) {
+    console.error("MIDTRANS WEBHOOK ERROR:", error);
+    // Balas 500 supaya Midtrans retry -- ini kasus error internal, bukan status transaksi.
+    return res.status(500).json({ success: false, message: "Gagal memproses notifikasi webhook" });
+  }
+};
+
+// ======================================================
 // NEW: START PRO TRIAL (7 Days Free Trial Activation)
 // ======================================================
 exports.startTrial = async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
       return res.status(401).json({ success: false, message: "User tidak terautentikasi" });
+    }
+
+    // 🔒 WAJIB ADA tenant_id -- tanpa ini subscription tidak akan tersinkron ke company/tenant
+    const tenantId = req.user.tenant_id;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: "Tenant ID tidak ditemukan pada sesi Anda. Silakan login ulang.",
+      });
     }
 
     // 1. Cek kuota pemakaian trial user
@@ -264,28 +479,48 @@ exports.startTrial = async (req, res) => {
     // 2. Tandai status sub lama sebagai EXPIRED di tabel tbr_subscriptions jika ada
     try {
       await db.query(
-        `UPDATE tbr_subscriptions SET status = 'EXPIRED' WHERE user_id = ?`,
-        [req.user.id]
+        `UPDATE tbr_subscriptions SET status = 'EXPIRED' WHERE tenant_id = ?`,
+        [tenantId]
       );
     } catch (e) {
       console.warn("Tabel tbr_subscriptions dilewati atau belum diintegrasi:", e.message);
     }
 
-    // 3. Catat transaksi log trial baru ke tbr_subscriptions
+    // 3. Catat transaksi log trial baru ke tbr_subscriptions (tersimpan per tenant, bukan per user)
     try {
       await db.query(
         `
         INSERT INTO tbr_subscriptions
-          (user_id, package_type, billing_cycle, start_date, end_date, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+          (tenant_id, user_id, package_type, billing_cycle, start_date, end_date, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
-        [req.user.id, "PRO", "TRIAL", mysqlNowString, mysqlEndString, "ACTIVE"]
+        [tenantId, req.user.id, "PRO", "TRIAL", mysqlNowString, mysqlEndString, "ACTIVE"]
       );
     } catch (subInsertErr) {
       console.warn("Skip log tbr_subscriptions insert:", subInsertErr.message);
     }
 
-    // 4. UPDATE Data Utama User (Sinkronisasi dengan skema asli tbr_users Anda)
+    // 4. 🔴 SUMBER KEBENARAN UTAMA: UPDATE tbr_tenants (bukan tbr_users)
+    //    Ini yang membuat SEMUA admin/superadmin di company yang sama langsung sinkron.
+    await db.query(
+      `
+      UPDATE tbr_tenants
+      SET
+        is_trial = 1,
+        package_type = 'PRO',
+        billing_cycle = 'TRIAL',
+        subscription_status = 'trialing',
+        trial_start = ?,
+        trial_end = ?,
+        subscription_ends_at = ?,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [mysqlNowString, mysqlEndString, mysqlEndString, tenantId]
+    );
+
+    // 5. UPDATE tbr_users -- flag trial_used tetap per-user (supaya 1 user cuma bisa 1x klaim trial),
+    //    field lain di-mirror biar kompatibel dengan kode lama yang masih baca dari tbr_users.
     await db.query(
       `
       UPDATE tbr_users
@@ -307,6 +542,7 @@ exports.startTrial = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Trial Paket PRO berhasil diaktifkan selama 7 hari!",
+      note: "PENTING: frontend wajib refresh token/re-login agar dashboard & fitur lain terbaca update.",
     });
 
   } catch (err) {
@@ -333,6 +569,15 @@ exports.activatePlan = async (req, res) => {
       });
     }
 
+    // 🔒 WAJIB ADA tenant_id -- tanpa ini persis bug "subscription masuk tapi tenant ga masuk"
+    const tenantId = req.user.tenant_id;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: "Tenant ID tidak ditemukan pada sesi Anda. Silakan login ulang.",
+      });
+    }
+
     if (!package_type || !billing_cycle) {
       return res.status(400).json({
         success: false,
@@ -342,11 +587,13 @@ exports.activatePlan = async (req, res) => {
 
     try {
       await db.query(
-        `UPDATE tbr_subscriptions SET status = 'EXPIRED' WHERE user_id = ?`,
-        [req.user.id]
+        `UPDATE tbr_subscriptions SET status = 'EXPIRED' WHERE tenant_id = ?`,
+        [tenantId]
       );
-    } catch (e) {}
-    
+    } catch (e) {
+      console.warn("Skip expire tbr_subscriptions:", e.message);
+    }
+
     const startDate = new Date();
     const endDate = new Date();
 
@@ -363,14 +610,33 @@ exports.activatePlan = async (req, res) => {
       await db.query(
         `
         INSERT INTO tbr_subscriptions 
-          (user_id, package_type, billing_cycle, start_date, end_date, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+          (tenant_id, user_id, package_type, billing_cycle, start_date, end_date, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
-        [req.user.id, package_type.toUpperCase(), billing_cycle.toUpperCase(), mysqlStart, mysqlEnd, "ACTIVE"]
+        [tenantId, req.user.id, package_type.toUpperCase(), billing_cycle.toUpperCase(), mysqlStart, mysqlEnd, "ACTIVE"]
       );
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Skip insert tbr_subscriptions:", e.message);
+    }
 
-    // Pembelian Resmi (Paid Plan) mengubah status menjadi 'active' & mematikan is_trial
+    // 🔴 SUMBER KEBENARAN UTAMA: UPDATE tbr_tenants
+    // Ini yang membuat "kelola perusahaan" ter-update dan semua admin/superadmin di tenant sama langsung sinkron.
+    await db.query(
+      `
+      UPDATE tbr_tenants
+      SET
+        package_type = ?,
+        billing_cycle = ?,
+        subscription_status = 'active',
+        subscription_ends_at = ?,
+        is_trial = 0,
+        updated_at = NOW()
+      WHERE id = ?
+      `,
+      [package_type.toUpperCase(), billing_cycle.toUpperCase(), mysqlEnd, tenantId]
+    );
+
+    // UPDATE tbr_users juga -- untuk kompatibilitas kode lama yang masih baca package_type dari sini
     await db.query(
       `
       UPDATE tbr_users
@@ -389,6 +655,7 @@ exports.activatePlan = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Paket berhasil diaktifkan",
+      note: "PENTING: frontend wajib refresh token/re-login agar dashboard & fitur lain (project, github integration) terbaca update.",
     });
 
   } catch (err) {

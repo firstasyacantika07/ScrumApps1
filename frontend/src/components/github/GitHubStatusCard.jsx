@@ -17,7 +17,9 @@ const GitHubStatusCard = ({ project, integrationData, refreshData }) => {
   const userData = JSON.parse(localStorage.getItem("user") || "{}");
   const userRole = userData?.role?.toUpperCase()?.replace(/\s+/g, '') || "";
   
-  const isBA = userRole === "BUSINESSANALYST";
+  // "admin2" masuk ke jalur manajemen yang sama seperti BA (bisa Request Repository),
+  // bukan jalur read-only default. Otorisasi aktual tetap ditegakkan di backend.
+  const isBA = userRole === "BUSINESSANALYST" || userRole === "ADMIN2";
   const isFreePackage = (userData?.package_type || "FREE").toUpperCase() === "FREE";
 
   const showFeedback = (text, type = "success") => {

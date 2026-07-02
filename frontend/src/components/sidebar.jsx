@@ -79,7 +79,7 @@ const Sidebar = () => {
       name: 'GitHub Integrations', 
       path: '/github-integrations', 
       icon: GitBranch, 
-      show: isRole('superadmin') || isRole('admin') || isRole('businessanalyst') || isRole('teamdeveloper')
+      show: isRole('superadmin') || isRole('admin') || isRole('businessanalyst') || isRole('teamdeveloper') || isRole('admin02') 
     },
 
     // ------------------------------------------------------------------------

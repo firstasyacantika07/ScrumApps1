@@ -17,6 +17,77 @@ const checkGitHubPackagePermission = (req, res) => {
     return true;
 };
 
+/**
+ * 🔒 INTERNAL HELPER: Normalisasi string role (hilangkan spasi/underscore/case)
+ * agar perbandingan role konsisten di seluruh controller ini.
+ */
+const normalizeRole = (role) => (role || '').toString().toLowerCase().replace(/[\s_-]+/g, '');
+
+/**
+ * 🔒 INTERNAL HELPER: Apakah role ini Superadmin Platform Pusat?
+ * Superadmin punya otoritas lintas-tenant (tidak perlu tenant ownership check).
+ */
+const isPlatformSuperadmin = (role) => {
+    const r = normalizeRole(role);
+    return r === 'superadmin';
+};
+
+/**
+ * 🔒 INTERNAL HELPER: Apakah role ini termasuk manajer tingkat tenant
+ * (Admin workspace, Admin2, Business Analyst, Project Owner)?
+ * Role-role ini HANYA boleh bertindak di dalam tenant mereka sendiri —
+ * pemanggil wajib tetap memverifikasi kecocokan tenant_id secara terpisah.
+ */
+const isTenantManagerRole = (role) => {
+    const r = normalizeRole(role);
+    return ['admin', 'admin2', 'businessanalyst', 'projectowner'].includes(r);
+};
+
+/**
+ * 🔒 INTERNAL HELPER: Ambil tenant_id pemilik sebuah integrasi GitHub
+ * berdasarkan project yang menaunginya. Return null jika integrasi tidak ada.
+ */
+const getIntegrationOwnerTenant = async (integrationId) => {
+    const [rows] = await db.query(
+        `SELECT gi.id, gi.project_id, p.tenant_id
+         FROM tbr_github_integrations gi
+         JOIN tbr_projects p ON gi.project_id = p.id
+         WHERE gi.id = ?`,
+        [integrationId]
+    );
+    return rows.length > 0 ? rows[0] : null;
+};
+
+/**
+ * 🔒 INTERNAL HELPER: Validasi bahwa req.user berhak bertindak atas sebuah
+ * integrasi tertentu — baik sebagai Superadmin (akses global) maupun sebagai
+ * manajer tenant yang tenant_id-nya cocok dengan pemilik proyek integrasi itu.
+ * Mengembalikan { authorized, integration, status, message }.
+ */
+const authorizeIntegrationAction = async (req, integrationId) => {
+    const integration = await getIntegrationOwnerTenant(integrationId);
+    if (!integration) {
+        return { authorized: false, status: 404, message: 'Data integrasi/pengajuan tidak ditemukan.' };
+    }
+
+    const role = req.user?.role;
+    const tenantId = req.user?.tenant_id;
+
+    if (isPlatformSuperadmin(role)) {
+        return { authorized: true, integration };
+    }
+
+    if (isTenantManagerRole(role) && tenantId && tenantId === integration.tenant_id) {
+        return { authorized: true, integration };
+    }
+
+    return {
+        authorized: false,
+        status: 403,
+        message: 'Akses Ditolak: Anda tidak memiliki otoritas atas integrasi repositori ini.'
+    };
+};
+
 // =========================================================================
 // 👑 1. SINKRONISASI TAMPILAN SUPERADMIN (Global SaaS Monitoring)
 // =========================================================================
@@ -288,10 +359,18 @@ const getAllIntegrationRequests = async (req, res, next) => {
         const userRole = req.user?.role;
         const tenantId = req.user?.tenant_id;
 
+        // 🔒 FIX: Role gate eksplisit — sebelumnya fungsi ini tidak melakukan
+        // pengecekan otorisasi sama sekali, sehingga siapa pun yang login bisa
+        // memanggilnya. Diselaraskan dengan helper yang sudah dipakai di
+        // authorizeIntegrationAction (approve/reject/disconnect).
+        if (!isPlatformSuperadmin(userRole) && !isTenantManagerRole(userRole)) {
+            return res.status(403).json({ success: false, message: 'Akses Ditolak: Anda tidak memiliki otoritas untuk melihat data ini.' });
+        }
+
         let query;
         let params = [];
 
-        if (userRole === 'superadmin' || userRole === 'super_admin') {
+        if (isPlatformSuperadmin(userRole)) {
             query = `
                 SELECT gi.id, gi.project_id, p.name AS project_name, gi.requester_name, 
                        gi.github_owner AS repository_owner, gi.github_repo AS repository_name, 
@@ -301,6 +380,11 @@ const getAllIntegrationRequests = async (req, res, next) => {
                 ORDER BY gi.created_at DESC
             `;
         } else {
+            // isTenantManagerRole(userRole) === true di titik ini (termasuk admin2).
+            // Wajib punya tenantId — kalau tidak ada, jangan kembalikan seluruh data lintas-tenant.
+            if (!tenantId) {
+                return res.status(403).json({ success: false, message: 'Akses Ditolak: Tenant tidak teridentifikasi pada akun Anda.' });
+            }
             query = `
                 SELECT gi.id, gi.project_id, p.name AS project_name, gi.requester_name, 
                        gi.github_owner AS repository_owner, gi.github_repo AS repository_name, 
@@ -323,6 +407,12 @@ const getAllIntegrationRequests = async (req, res, next) => {
 const rejectIntegrationRequest = async (req, res, next) => {
     try {
         const { id } = req.params;
+
+        const auth = await authorizeIntegrationAction(req, id);
+        if (!auth.authorized) {
+            return res.status(auth.status).json({ success: false, message: auth.message });
+        }
+
         const [result] = await db.query('UPDATE tbr_github_integrations SET status = "Rejected" WHERE id = ?', [id]);
 
         if (result.affectedRows === 0) {
@@ -337,6 +427,12 @@ const rejectIntegrationRequest = async (req, res, next) => {
 const approveIntegrationRequest = async (req, res, next) => {
     try {
         const { id } = req.params;
+
+        const auth = await authorizeIntegrationAction(req, id);
+        if (!auth.authorized) {
+            return res.status(auth.status).json({ success: false, message: auth.message });
+        }
+
         const [result] = await db.query('UPDATE tbr_github_integrations SET status = "Approved" WHERE id = ?', [id]);
 
         if (result.affectedRows === 0) {
@@ -361,6 +457,12 @@ const approveIntegrationRequest = async (req, res, next) => {
 const disconnectGitHub = async (req, res, next) => {
     try {
         const { id } = req.params;
+
+        const auth = await authorizeIntegrationAction(req, id);
+        if (!auth.authorized) {
+            return res.status(auth.status).json({ success: false, message: auth.message });
+        }
+
         const [integration] = await db.query('SELECT project_id, github_owner, github_repo FROM tbr_github_integrations WHERE id = ?', [id]);
         
         if (integration.length === 0) {
