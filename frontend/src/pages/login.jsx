@@ -207,7 +207,11 @@ const Login = () => {
               />
             </div>
             
-            <p className="mt-20 text-slate-300 text-[10px] text-center uppercase tracking-[4px] font-bold italic">
+            <p className="mt-8 text-center text-slate-500 font-medium">
+              Belum punya akun? <Link to="/register" className="text-[#D31217] font-bold hover:underline">Daftar di sini</Link>
+            </p>
+
+            <p className="mt-12 text-slate-300 text-[10px] text-center uppercase tracking-[4px] font-bold italic">
               ScrumApps Project Management Tool
             </p>
           </div>

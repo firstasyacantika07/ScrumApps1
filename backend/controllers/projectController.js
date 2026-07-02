@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const notificationService = require('../services/notificationService');
 
 /**
  * =========================================================================
@@ -14,6 +15,46 @@ const createLog = async (userId, projectId, activityDescription) => {
     await db.query(sql, [userId, projectId, activityDescription]);
   } catch (err) {
     console.error("[AUDIT LOG ERROR]:", err.message);
+  }
+};
+/**
+ * =========================================================================
+ * HELPER : Kirim notifikasi status project ke seluruh member project
+ * =========================================================================
+ */
+const notifyProjectMembers = async (projectId, projectName, status) => {
+  try {
+
+    if (!["late", "done"].includes(String(status).toLowerCase())) {
+      return;
+    }
+
+    const [members] = await db.query(`
+      SELECT
+        u.id,
+        u.name,
+        u.email
+      FROM tbr_project_members pm
+      INNER JOIN tbr_users u
+        ON pm.user_id = u.id
+      WHERE pm.project_id = ?
+    `, [projectId]);
+
+    for (const member of members) {
+
+      await notificationService.sendProjectStatusNotification({
+        projectId,
+        userId: member.id,
+        email: member.email,
+        userName: member.name,
+        projectName,
+        status: String(status).toLowerCase()
+      });
+
+    }
+
+  } catch (err) {
+    console.error("[PROJECT NOTIFICATION ERROR]", err.message);
   }
 };
 
@@ -56,6 +97,19 @@ exports.createProject = async (req, res) => {
     );
 
     await createLog(userId, result.insertId, `Membuat proyek baru: "${req.body.name}"`);
+
+    // RF-13.1: notifikasi ke Product Owner saat ditambahkan ke proyek
+    if (userRole === 'admin') {
+      const [[ownerInfo]] = await db.query(`SELECT name, email FROM tbr_users WHERE id = ?`, [userId]);
+      if (ownerInfo?.email) {
+        await notificationService.sendProjectAssignmentNotification({
+          userId,
+          email: ownerInfo.email,
+          userName: ownerInfo.name,
+          projectName: req.body.name,
+        });
+      }
+    }
 
     res.status(201).json({ success: true, message: "Proyek berhasil dibuat", id: result.insertId });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -159,10 +213,14 @@ exports.updateProject = async (req, res) => {
     `;
     await db.query(sql, [name, start_date, end_date, status, repo_url || null, projectId, tenantId]);
     
+    // Memanggil helper notifikasi
+    await notifyProjectMembers(projectId, name, status);
+    
     await createLog(userId, projectId, `Memperbarui detail proyek. Status: ${status}, Repo: ${repo_url ? 'Diubah' : 'Belum Ditentukan'}`);
     res.json({ success: true, message: "Proyek berhasil diperbarui" });
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
+
 
 exports.deleteProject = async (req, res) => {
   try {
@@ -177,6 +235,24 @@ exports.deleteProject = async (req, res) => {
 
     const [projectInfo] = await db.query(`SELECT name FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
     if (projectInfo.length === 0) return res.status(404).json({ message: "Proyek tidak ditemukan." });
+
+    // RF-13.2: notifikasi ke semua Product Owner SEBELUM proyek benar-benar dihapus
+    const [owners] = await db.query(
+      `SELECT u.id, u.name, u.email FROM tbr_project_members pm
+       INNER JOIN tbr_users u ON pm.user_id = u.id
+       WHERE pm.project_id = ? AND pm.role_in_project = 'ProjectOwner'`,
+      [projectId]
+    );
+    for (const owner of owners) {
+      if (owner.email) {
+        await notificationService.sendProjectRemovalNotification({
+          userId: owner.id,
+          email: owner.email,
+          userName: owner.name,
+          projectName: projectInfo[0].name,
+        });
+      }
+    }
 
     await db.query(`DELETE FROM tbr_projects WHERE id=? AND tenant_id=?`, [projectId, tenantId]);
     await createLog(userId, projectId, `Menghapus proyek "${projectInfo[0].name}" secara permanen`);

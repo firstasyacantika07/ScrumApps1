@@ -1,66 +1,191 @@
-const Notification = require('../models/notificationModel');
-const sendEmail = require('./emailService');
+const { sendEmail } = require('./emailService');
+// 🔧 FIX: Nama variabel import sebelumnya "Notification" tapi dipakai sebagai
+// "notificationModel" di bawah (beda nama) -> selalu ReferenceError setiap
+// dispatch() dipanggil, sehingga notifikasi in-app (website) SELALU GAGAL diam-diam.
+const notificationModel = require('../models/notificationModel');
 
 /**
- * SERVICE NOTIFIKASI
- * Fokus: Menyimpan ke database (untuk ikon lonceng) 
- * dan mengirim email (sesuai kebutuhan bisnis)
+ * Helper internal: kirim email DAN simpan notifikasi website secara bersamaan.
+ * Kalau salah satu gagal, yang lain tetap jalan (tidak saling menggagalkan).
  */
+const dispatch = async ({ userId, projectId = null, type, email, subject, html, title, message }) => {
+  const [emailResult, notifResult] = await Promise.allSettled([
+    email ? sendEmail(email, subject, html) : Promise.resolve(false),
+    userId ? notificationModel.create({ userId, projectId, type, title, message }) : Promise.resolve(null)
+  ]);
 
-// 1. Notifikasi Proyek Baru (RF-13)
-exports.sendProjectAddedNotification = async (data) => {
-    await Notification.create({
-        user: data.userId,
-        title: "Proyek baru!",
-        message: `${data.createdBy} telah menambahkan kamu ke proyek "${data.projectName}" sebagai ${data.role}.`,
-        isRead: false
-    });
+  if (emailResult.status === 'rejected') {
+    console.error('[NOTIFICATION] Gagal kirim email:', emailResult.reason?.message || emailResult.reason);
+  }
+  if (notifResult.status === 'rejected') {
+    console.error('[NOTIFICATION] Gagal simpan notifikasi in-app:', notifResult.reason?.message || notifResult.reason);
+  }
 
-    await sendEmail(data.email, "Kamu ditambahkan ke proyek", `Halo ${data.userName}, ${data.createdBy} telah menambahkan kamu ke proyek "${data.projectName}".`);
+  return {
+    emailSent: emailResult.status === 'fulfilled' ? emailResult.value : false,
+    notifId: notifResult.status === 'fulfilled' ? notifResult.value : null,
+  };
 };
 
-// 2. Notifikasi Proyek Dihapus (RF-13.2)
-exports.sendProjectDeletedNotification = async (data) => {
-    await Notification.create({
-        user: data.userId,
-        title: "Proyek dihapus",
-        message: `Proyek "${data.projectName}" telah dihapus oleh ${data.deletedBy}.`,
-        isRead: false
-    });
+/**
+ * =========================================================================
+ * TEMPLATE BASE: Kartu email premium ScrumApps (gaya sama dengan
+ * invitationController.js) — header brand, badge warna sesuai tipe notifikasi,
+ * isi pesan, tombol CTA, dan footer otomatis.
+ * =========================================================================
+ * @param {string} badgeLabel - teks kecil di atas (mis. "STATUS PROYEK")
+ * @param {string} badgeColor - warna aksen badge & tombol (hex)
+ * @param {string} heading - judul utama di dalam kartu
+ * @param {string} bodyHtml - isi pesan (boleh berupa beberapa paragraf HTML)
+ * @param {string} ctaLabel - teks tombol aksi
+ * @param {string} ctaUrl - link tombol aksi
+ */
+const buildEmailCard = ({ badgeLabel, badgeColor = '#ee1e2d', heading, bodyHtml, ctaLabel = 'Buka ScrumApps', ctaUrl = process.env.FRONTEND_URL || 'http://localhost:5173' }) => `
+  <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 550px; margin: 0 auto; padding: 30px; border: 1px solid #f0f0f0; border-radius: 24px; background-color: #ffffff;">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <h2 style="color: #ee1e2d; margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px;">ScrumApps</h2>
+      <p style="color: #94a3b8; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin-top: 5px; font-weight: bold;">SaaS Agile Project Management</p>
+    </div>
 
-    await sendEmail(data.email, `Proyek "${data.projectName}" telah dihapus`, `Halo ${data.userName}, proyek tersebut telah dihapus oleh ${data.deletedBy}.`);
+    <div style="text-align: center; margin-bottom: 18px;">
+      <span style="display: inline-block; background-color: ${badgeColor}1A; color: ${badgeColor}; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; padding: 6px 14px; border-radius: 999px;">
+        ${badgeLabel}
+      </span>
+    </div>
+
+    <h3 style="color: #0f172a; font-size: 18px; font-weight: 800; text-align: center; margin: 0 0 16px 0;">${heading}</h3>
+
+    <div style="color: #334155; font-size: 14px; line-height: 1.6;">
+      ${bodyHtml}
+    </div>
+
+    <div style="text-align: center; margin: 30px 0 10px 0;">
+      <a href="${ctaUrl}" style="background-color: #0f172a; color: #ffffff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 13px; font-weight: bold; display: inline-block; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+        ${ctaLabel}
+      </a>
+    </div>
+
+    <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0 20px 0;" />
+    <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">
+      Email ini dikirim secara otomatis oleh sistem ScrumApps. Mohon untuk tidak membalas email ini.
+    </p>
+  </div>
+`;
+
+const notificationService = {
+  // RF-13.1: Notifikasi Tambah Proyek — Product Owner menerima notifikasi
+  // melalui email saat ditambahkan ke dalam proyek.
+  sendProjectAssignmentNotification: async ({ userId, email, userName, projectName, projectId = null }) => {
+    const subject = `Anda Ditambahkan Pada Proyek Baru: ${projectName}`;
+    const message = `Anda telah ditambahkan sebagai Product Owner pada proyek "${projectName}".`;
+    const html = buildEmailCard({
+      badgeLabel: 'Penugasan Proyek',
+      badgeColor: '#2563eb',
+      heading: 'Anda Ditambahkan ke Proyek Baru',
+      bodyHtml: `
+        <p>Halo, <strong>${userName}</strong></p>
+        <p>Anda telah ditambahkan sebagai <strong>Product Owner</strong> pada proyek <strong>${projectName}</strong>. Anda sekarang dapat memantau progres, mengelola backlog, dan berkoordinasi dengan tim langsung dari dashboard.</p>
+      `,
+      ctaLabel: 'Buka Proyek Saya',
+      ctaUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/projects`,
+    });
+    return dispatch({
+      userId, projectId, email, subject, html,
+      type: 'project_assignment',
+      title: 'Ditambahkan ke proyek baru',
+      message
+    });
+  },
+
+  // RF-13.2: Notifikasi Hapus Proyek — Product Owner menerima notifikasi
+  // melalui email saat proyek dihapus.
+  sendProjectRemovalNotification: async ({ userId, email, userName, projectName, projectId = null }) => {
+    const subject = `Pemberitahuan Penghapusan Proyek: ${projectName}`;
+    const message = `Proyek "${projectName}" telah dihapus dari sistem.`;
+    const html = buildEmailCard({
+      badgeLabel: 'Proyek Dihapus',
+      badgeColor: '#ee1e2d',
+      heading: 'Proyek Telah Dihapus Permanen',
+      bodyHtml: `
+        <p>Halo, <strong>${userName}</strong></p>
+        <p>Proyek <strong>${projectName}</strong> yang sebelumnya Anda kelola telah dihapus secara permanen oleh Admin Workspace. Seluruh data terkait proyek ini (backlog, sprint, dan tugas) sudah tidak dapat diakses lagi.</p>
+      `,
+      ctaLabel: 'Lihat Workspace Saya',
+      ctaUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/dashboard`,
+    });
+    return dispatch({
+      userId, projectId, email, subject, html,
+      type: 'project_removal',
+      title: 'Proyek dihapus',
+      message
+    });
+  },
+
+  // RF-04: Pengguna menerima notifikasi status proyek saat late/terlambat
+  // dan done/selesai.
+  sendProjectStatusNotification: async ({ userId, email, userName, projectName, status, projectId = null }) => {
+    const isLate = status === 'late';
+    const statusLabel = isLate ? 'TERLAMBAT' : 'SELESAI';
+    const subject = `Update Status Proyek: ${projectName} (${statusLabel})`;
+    const message = `Status proyek "${projectName}" telah diperbarui menjadi ${statusLabel}.`;
+    const html = buildEmailCard({
+      badgeLabel: isLate ? 'Proyek Terlambat' : 'Proyek Selesai',
+      badgeColor: isLate ? '#ee1e2d' : '#16a34a',
+      heading: isLate ? 'Proyek Melewati Tenggat Waktu' : 'Proyek Telah Selesai',
+      bodyHtml: isLate
+        ? `
+          <p>Halo, <strong>${userName}</strong></p>
+          <p>Proyek <strong>${projectName}</strong> kini berstatus <strong style="color:#ee1e2d;">TERLAMBAT</strong>. Mohon segera ditinjau agar progres kembali sesuai target.</p>
+        `
+        : `
+          <p>Halo, <strong>${userName}</strong></p>
+          <p>Selamat! Proyek <strong>${projectName}</strong> telah ditandai <strong style="color:#16a34a;">SELESAI</strong>. Terima kasih atas kerja keras seluruh tim.</p>
+        `,
+      ctaLabel: 'Lihat Detail Proyek',
+      ctaUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/projects`,
+    });
+    return dispatch({
+      userId, projectId, email, subject, html,
+      type: 'project_status',
+      title: `Status proyek: ${statusLabel}`,
+      message
+    });
+  },
+
+  // RF-14.1: Product Owner menerima notifikasi pengingat sprint akan
+  // berakhir melalui email saat tenggat sprint kurang dari tiga hari.
+  sendSprintReminderNotification: async ({ userId, email, userName, projectName, sprintName, daysLeft, projectId = null }) => {
+    const dayLabel = daysLeft === 0 ? 'hari ini' : `${daysLeft} hari lagi`;
+    const subject = `Pengingat Sprint: ${sprintName} akan berakhir ${dayLabel}`;
+    const message = `Sprint "${sprintName}" pada proyek "${projectName}" akan berakhir ${dayLabel}.`;
+    const html = buildEmailCard({
+      badgeLabel: 'Pengingat Sprint',
+      badgeColor: '#f59e0b',
+      heading: `Sprint Berakhir ${dayLabel}`,
+      bodyHtml: `
+        <p>Halo, <strong>${userName}</strong></p>
+        <p>Sprint <strong>${sprintName}</strong> pada proyek <strong>${projectName}</strong> akan berakhir <strong style="color:#f59e0b;">${dayLabel}</strong>. Pastikan seluruh backlog dan tugas pada sprint ini sudah ditinjau sebelum tenggat waktu.</p>
+      `,
+      ctaLabel: 'Buka Papan Sprint',
+      ctaUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/projects`,
+    });
+    return dispatch({
+      userId, projectId, email, subject, html,
+      type: 'sprint_reminder',
+      title: 'Pengingat sprint',
+      message
+    });
+  },
+
+  // Helper: hitung selisih hari secara akurat (bukan getDate() - getDate())
+  getDaysLeft: (endDate) => {
+    const MS_PER_DAY = 1000 * 60 * 60 * 24;
+    const end = new Date(endDate);
+    end.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((end - today) / MS_PER_DAY);
+  }
 };
 
-// 3. Notifikasi Status Proyek (RF-04 - Done/Late)
-exports.sendProjectStatusNotification = async (data) => {
-    // Simpan ke DB agar muncul di lonceng (image_6d34a2.png)
-    await Notification.create({
-        user: data.userId,
-        title: "Update Status Proyek",
-        message: `Status proyek "${data.projectName}" sekarang adalah: ${data.status.toUpperCase()}.`,
-        isRead: false
-    });
-
-    // Kirim Email
-    await sendEmail(
-        data.email, 
-        `Pemberitahuan Status Proyek: ${data.projectName}`, 
-        `Halo ${data.userName}, status proyek "${data.projectName}" telah berubah menjadi ${data.status}. Mohon segera dicek.`
-    );
-};
-
-// 4. Notifikasi Pengingat Sprint (RF-14)
-exports.sendSprintReminderNotification = async (data) => {
-    await Notification.create({
-        user: data.userId,
-        title: "Pengingat Sprint",
-        message: `Sprint proyek "${data.projectName}" akan berakhir dalam kurang dari 3 hari.`,
-        isRead: false
-    });
-
-    await sendEmail(
-        data.email, 
-        `Pengingat Sprint: ${data.projectName}`, 
-        `Halo ${data.userName}, tenggat waktu sprint "${data.projectName}" akan berakhir dalam 3 hari. Mohon selesaikan tugas Anda.`
-    );
-};
+module.exports = notificationService;

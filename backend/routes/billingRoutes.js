@@ -19,6 +19,74 @@ router.use(verifyToken);
 // ======================================================
 
 /**
+ * 📡 GET: Status paket & kuota workspace aktif tenant yang sedang login
+ * Endpoint: GET /api/billing/status
+ * Dipakai oleh Dashboard.jsx (role Admin) untuk menampilkan kartu billing.
+ */
+router.get('/status', async (req, res) => {
+    try {
+        const tenantId = req.user?.tenant_id;
+
+        if (!tenantId) {
+            return res.status(404).json({
+                success: false,
+                message: "Data perusahaan/workspace tidak ditemukan untuk akun Anda."
+            });
+        }
+
+        const packageType = (req.user.package_type || 'FREE').toUpperCase();
+        const billingCycle = req.user.billing_cycle || 'NONE';
+        const trialEnd = req.user.trial_end;
+        const subscriptionEndsAt = req.user.subscription_ends_at;
+
+        let remainingDays = 0;
+        const referenceEndDate = billingCycle === 'TRIAL' ? trialEnd : subscriptionEndsAt;
+        if (referenceEndDate) {
+            const diffMs = new Date(referenceEndDate).getTime() - Date.now();
+            remainingDays = diffMs > 0 ? Math.ceil(diffMs / (1000 * 60 * 60 * 24)) : 0;
+        }
+
+        const [projectRows] = await db.query(
+            'SELECT COUNT(*) as total FROM tbr_projects WHERE tenant_id = ?',
+            [tenantId]
+        );
+        const projectUsed = projectRows[0]?.total || 0;
+
+        const [teamRows] = await db.query(
+            'SELECT COUNT(*) as total FROM tbr_users WHERE tenant_id = ?',
+            [tenantId]
+        );
+        const teamUsed = teamRows[0]?.total || 0;
+
+        // 🔒 Batas kuota konsisten dengan middleware/SubscriptionsMiddleware.js
+        const PACKAGE_LIMITS = {
+            FREE: { project: 1, team: 5 },
+            PRO: { project: 15, team: 25 },
+            ENTERPRISE: { project: null, team: null }
+        };
+        const limits = PACKAGE_LIMITS[packageType] || PACKAGE_LIMITS.FREE;
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                package_type: packageType,
+                remaining_days: remainingDays,
+                project_used: projectUsed,
+                project_limit: limits.project,
+                team_used: teamUsed,
+                team_limit: limits.team
+            }
+        });
+    } catch (error) {
+        console.error("GET BILLING STATUS ROUTE ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Gagal mengambil status billing workspace."
+        });
+    }
+});
+
+/**
  * 🎯 GET: Ambil semua daftar paket (Plans) dari database
  * Endpoint: GET /api/billing/plans
  */

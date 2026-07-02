@@ -12,6 +12,7 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 // PUBLIC PAGES
 // ======================================================
 import Login from './pages/Login';
+import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import AcceptInvite from './pages/Acceptinvite';
 
@@ -96,6 +97,10 @@ function AppRoutes() {
         path="/login"
         element={user ? <Navigate to="/dashboard" replace /> : <Login />}
       />
+      <Route
+        path="/register"
+        element={user ? <Navigate to="/dashboard" replace /> : <Register />}
+      />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
 
@@ -110,6 +115,12 @@ function AppRoutes() {
         {/* AMAN UNTUK SEMUA ROLE */}
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/projects" element={<ProjectList />} />
+        {/* 🛠️ FIX: Tanpa route literal ini, "/projects/create" tertangkap oleh
+            "/projects/:id/*" (id = "create"), sehingga ProjectDetail ikut mount
+            dan memanggil /api/projects/create/github-status -> 400 Bad Request.
+            Pembuatan proyek dilakukan lewat modal di ProjectList, jadi cukup
+            redirect balik ke /projects. */}
+        <Route path="/projects/create" element={<Navigate to="/projects" replace />} />
         <Route path="/projects/:id/*" element={<ProjectDetail />} />
         <Route path="/info" element={<Info />} />
         <Route path="/kelolaprofil" element={<KelolaProfil />} />

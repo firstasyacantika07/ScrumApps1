@@ -1,19 +1,20 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 import { EyeOff, Eye } from 'lucide-react';
+import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 const Register = () => {
   const [formData, setFormData] = useState({ 
     name: '', 
     email: '', 
-    password: '', 
-    role: 'TeamDeveloper' 
+    password: ''
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -23,10 +24,18 @@ const Register = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      // Mengirim data ke backend
-      await axios.post('http://localhost:5000/api/auth/register', formData);
-      alert('Registrasi berhasil! Silakan login.');
-      navigate('/login');
+      // 🔧 FIX: Pakai instance `api` (sudah ada baseURL sesuai .env / ngrok), bukan hardcode localhost
+      const response = await api.post('/auth/register', formData);
+
+      // 🔧 FIX: Auto-login setelah register sukses, redirect ke dashboard
+      // (akses menu otomatis dibatasi sesuai role lewat AllowedRolesRoute di App.jsx)
+      if (response.data?.token) {
+        login(response.data.token, response.data.user);
+        navigate('/dashboard');
+      } else {
+        alert('Registrasi berhasil! Silakan login.');
+        navigate('/login');
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Terjadi kesalahan saat registrasi');
     } finally {
@@ -91,15 +100,10 @@ const Register = () => {
               </button>
             </div>
 
-            <select 
-              name="role" onChange={handleChange} value={formData.role}
-              className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#D31217] outline-none transition-all"
-            >
-              <option value="TeamDeveloper">Team Developer</option>
-              <option value="ProductOwner">Product Owner</option>
-              <option value="superadmin">Super Admin</option>
-              <option value="businessanalyst">Business Analyst</option>
-            </select>
+            <p className="text-xs text-slate-400 px-1 leading-relaxed">
+              Akun Anda akan otomatis dibuat sebagai <span className="font-bold text-slate-600">Admin</span> dari workspace baru.
+              Untuk mengundang anggota tim dengan role lain (Product Owner, Developer, dll), gunakan menu undangan setelah login.
+            </p>
 
             <button 
               type="submit" disabled={isLoading} 

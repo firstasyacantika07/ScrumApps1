@@ -11,11 +11,13 @@ const NotificationBell = () => {
     const fetchNotifications = async () => {
       try {
         const response = await api.get('/notifications');
-        const data = response.data.data; // Mengambil array dari respons API
+        const data = response.data.data;
         
         if (Array.isArray(data)) {
           setNotifications(data);
-          setUnreadCount(data.filter(n => n.isRead === false).length);
+          // PERBAIKAN: Menggunakan konversi ke boolean agar perbandingan lebih akurat
+          const unread = data.filter(n => Number(n.isRead) === 0);
+          setUnreadCount(unread.length);
         }
       } catch (err) {
         console.error("Gagal mengambil notifikasi:", err);
@@ -27,7 +29,7 @@ const NotificationBell = () => {
   const markAllAsRead = async () => {
     try {
       await api.patch('/notifications/read-all');
-      const updated = notifications.map(n => ({ ...n, isRead: true }));
+      const updated = notifications.map(n => ({ ...n, isRead: 1 }));
       setNotifications(updated);
       setUnreadCount(0);
     } catch (err) {
@@ -35,17 +37,31 @@ const NotificationBell = () => {
     }
   };
 
+  const markAsRead = async (id) => {
+    try {
+      await api.patch(`/notifications/read/${id}`);
+      const updated = notifications.map(n => 
+        (n.id === id ? { ...n, isRead: 1 } : n)
+      );
+      setNotifications(updated);
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (err) {
+      console.error("Gagal memperbarui status notifikasi:", err);
+    }
+  };
+
   const getIcon = (type) => {
     switch (type) {
       case 'LATE': return <Clock className="w-4 h-4 text-red-600" />;
       case 'DONE': return <CheckCircle className="w-4 h-4 text-green-600" />;
+      case 'SPRINT_REMINDER': return <Clock className="w-4 h-4 text-yellow-500" />;
+      case 'ASSIGNMENT': return <Mail className="w-4 h-4 text-indigo-600" />;
       default: return <Mail className="w-4 h-4 text-blue-600" />;
     }
   };
 
   return (
     <div className="relative inline-block">
-      {/* Tombol Lonceng */}
       <button 
         onClick={() => setIsOpen(!isOpen)} 
         className="relative p-2 text-slate-400 hover:text-slate-600 transition-all duration-200 hover:bg-slate-100 rounded-full focus:outline-none"
@@ -58,7 +74,6 @@ const NotificationBell = () => {
         )}
       </button>
 
-      {/* Dropdown Card */}
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
@@ -78,8 +93,9 @@ const NotificationBell = () => {
               ) : (
                 notifications.map((notif) => (
                   <div 
-                    key={notif._id} 
-                    className={`flex items-start gap-4 p-4 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 ${!notif.isRead ? 'bg-indigo-50/30' : ''}`}
+                    key={notif._id || notif.id} 
+                    onClick={() => Number(notif.isRead) === 0 && markAsRead(notif.id)}
+                    className={`flex items-start gap-4 p-4 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 ${Number(notif.isRead) === 0 ? 'bg-indigo-50/30' : ''}`}
                   >
                     <div className="flex-shrink-0 mt-1 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
                       {getIcon(notif.type)}
@@ -88,7 +104,7 @@ const NotificationBell = () => {
                       <p className="text-sm font-medium text-slate-900 truncate">{notif.title}</p>
                       <p className="text-xs text-slate-500 leading-snug mt-0.5">{notif.message}</p>
                       <span className="text-[10px] text-slate-400 font-medium mt-1.5 block">
-                        {new Date(notif.createdAt).toLocaleDateString()}
+                        {notif.time || new Date(notif.createdAt).toLocaleDateString('id-ID')}
                       </span>
                     </div>
                   </div>

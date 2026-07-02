@@ -5,6 +5,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 const helmet = require('helmet');
 const midtransClient = require('midtrans-client');
+const path = require('path'); 
 
 const app = express();
 
@@ -47,8 +48,10 @@ const superadminRoutes = require('./routes/superadminRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const invitationRoutes = require('./routes/invitationRoutes'); // Ditambahkan
+const { startCronJobs } = require('./cron/cronService');
 
-// Import tambahan untuk keperluan bypass controller & middleware
 const paymentController = require('./controllers/paymentController');
 const { verifyToken } = require('./middleware/auth');
 
@@ -56,20 +59,16 @@ const { verifyToken } = require('./middleware/auth');
    API ROUTES
 ========================================================= */
 
-// 👑 1. ROUTE UTAMA & AUTENTIKASI (Tanpa Wildcard Menggantung)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-
-// 👑 2. SUPERADMIN ROUTES (Ditaruh di atas agar tidak sengaja termakan rute dinamis billing/project)
 app.use('/api/superadmin', superadminRoutes);
-
-// 📦 3. FITUR REGULAR & SUBSCRIPTION
 app.use('/api/projects', projectRoutes);
 app.use('/api/dashboard', verifyToken, dashboardRoutes);
 app.use('/api/billing', billingRoutes); 
 app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/invitations', invitationRoutes); // Ditambahkan
 
-// 💡 BYPASS STRATEGY PAYMENT
 app.post('/api/payment/create-transaction', verifyToken, paymentController.createPayment);
 app.use('/api/payment', paymentRoutes);
 
@@ -88,10 +87,6 @@ app.get('/', (req, res) => {
     serverTime: new Date()
   });
 });
-
-/* =========================================================
-   MIDTRANS TEST ROUTE
-========================================================= */
 
 app.get('/api/test-midtrans', async (req, res) => {
   try {
@@ -119,7 +114,6 @@ app.get('/api/test-midtrans', async (req, res) => {
     });
   } catch (error) {
     console.error('Midtrans Error:', error.message);
-
     res.status(500).json({
       success: false,
       message: 'Failed connect to Midtrans',
@@ -129,7 +123,37 @@ app.get('/api/test-midtrans', async (req, res) => {
 });
 
 /* =========================================================
+   SAFETY REDIRECT: /accept-invite
+   (Jaga-jaga jika link undangan ter-klik lewat domain
+   backend ini, misalnya karena FRONTEND_URL di .env belum
+   benar. Route ini meneruskan ke FRONTEND_URL yang sebenarnya
+   beserta query string token-nya, alih-alih jatuh ke 404.)
+========================================================= */
+
+app.get('/accept-invite', (req, res) => {
+  const realFrontendUrl = process.env.REAL_FRONTEND_URL || process.env.FRONTEND_URL;
+
+  if (!realFrontendUrl || realFrontendUrl.includes(req.hostname)) {
+    return res.status(500).json({
+      success: false,
+      message:
+        'FRONTEND_URL belum dikonfigurasi dengan benar di .env (masih mengarah ke domain backend). Set REAL_FRONTEND_URL ke domain tempat aplikasi React berjalan.'
+    });
+  }
+
+  const queryString = req.originalUrl.split('?')[1];
+  const target = queryString
+    ? `${realFrontendUrl}/accept-invite?${queryString}`
+    : `${realFrontendUrl}/accept-invite`;
+
+  return res.redirect(302, target);
+});
+
+/* =========================================================
    404 HANDLER
+   (Backend ini hanya melayani API. Frontend React/Vite
+   berjalan terpisah dari backend, jadi tidak ada static
+   fallback ke folder dist/ di sini.)
 ========================================================= */
 
 app.use((req, res) => {
@@ -145,7 +169,6 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
-
   res.status(500).json({
     success: false,
     message: 'Internal Server Error',
@@ -160,6 +183,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
+  startCronJobs();
   console.log(`
 ==================================================
 🚀 ScrumApps Backend Running
