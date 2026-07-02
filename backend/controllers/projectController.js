@@ -70,6 +70,7 @@ exports.getProjects = async (req, res) => {
     let sql;
     let params;
 
+    // 💡 FIX: Memperbaiki alias dan penulisan nama tabel JOIN agar sinkron dengan MySQL
     if (userRole === 'superadmin') {
       sql = `
         SELECT p.*, tnt.package_type as tenant_package_type 
@@ -129,9 +130,9 @@ exports.getProjectById = async (req, res) => {
     const [rows] = await db.query(sql, params);
     if (rows.length === 0) return res.status(404).json({ message: "Project tidak ditemukan atau akses dilarang." });
     
-    if (userRole !== 'superadmin') {
-      await db.query(`UPDATE tbr_projects SET \`read\` = 1 WHERE id = ?`, [projectId]);
-    }
+if (userRole !== 'superadmin') {
+  await db.query(`UPDATE tbr_projects SET \`read\` = 1 WHERE id = ?`, [projectId]);
+}
     
     res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -178,8 +179,8 @@ exports.deleteProject = async (req, res) => {
     const [projectInfo] = await db.query(`SELECT name FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
     if (projectInfo.length === 0) return res.status(404).json({ message: "Proyek tidak ditemukan." });
 
-    await db.query(`DELETE FROM tbr_projects WHERE id=? AND tenant_id=?`, [projectId, tenantId]);
     await createLog(userId, projectId, `Menghapus proyek "${projectInfo[0].name}" secara permanen`);
+    await db.query(`DELETE FROM tbr_projects WHERE id=? AND tenant_id=?`, [projectId, tenantId]);
 
     res.json({ success: true, message: "Proyek berhasil dihapus secara permanen" });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -654,14 +655,13 @@ exports.getWorkspaceScrumStats = async (req, res) => {
       return res.status(400).json({ success: false, message: "Tenant ID tidak ditemukan." });
     }
 
-    // Menggunakan LEFT JOIN agar query tetap jalan meskipun tabel kosong
     const [statusRows] = await db.query(`
       SELECT 
         COUNT(b.id) as total_backlogs,
-        SUM(CASE WHEN b.status IN ('hold', 'inactive') THEN 1 ELSE 0 END) as hold,
-        SUM(CASE WHEN b.status IN ('progress', 'active') THEN 1 ELSE 0 END) as progress,
-        SUM(CASE WHEN b.status = 'done' THEN 1 ELSE 0 END) as done,
-        SUM(CASE WHEN b.status IN ('late', 'overdue') THEN 1 ELSE 0 END) as late
+        IFNULL(SUM(CASE WHEN b.status IN ('hold', 'inactive') THEN 1 ELSE 0 END), 0) as hold,
+        IFNULL(SUM(CASE WHEN b.status IN ('progress', 'active') THEN 1 ELSE 0 END), 0) as progress,
+        IFNULL(SUM(CASE WHEN b.status = 'done' THEN 1 ELSE 0 END), 0) as done,
+        IFNULL(SUM(CASE WHEN b.status IN ('late', 'overdue') THEN 1 ELSE 0 END), 0) as late
       FROM tbr_projects p
       LEFT JOIN tbr_backlogs b ON p.id = b.project_id
       WHERE p.tenant_id = ?

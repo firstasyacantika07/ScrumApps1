@@ -42,7 +42,6 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 
 // ======================================================
 // 🛡️ FLEXIBLE ROLE BASED ROUTE GUARD
-// ✅ FIX: Gabungkan deklarasi dan ambil state langsung dari useAuth()
 // ======================================================
 const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
   const { user, loading } = useAuth();
@@ -59,7 +58,6 @@ const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
   const userRole = user?.role?.toString().toLowerCase().replace(/\s+/g, '') || '';
 
   if (!allowedRoles.includes(userRole)) {
-    // Memberikan alert agar user tahu mengapa mereka dialihkan
     alert(`Akses Ditolak! Anda tidak memiliki izin untuk halaman ini. (Role saat ini: ${userRole || 'Tidak Diketahui'})`);
     return <Navigate to="/dashboard" replace />;
   }
@@ -68,7 +66,7 @@ const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
 };
 
 // ======================================================
-// ✅ PISAHKAN ROUTES KE KOMPONEN MANDIRI
+// ✅ APP ROUTES SYSTEM
 // ======================================================
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -80,7 +78,7 @@ function AppRoutes() {
         display: 'flex', justifyContent: 'center',
         alignItems: 'center', height: '100vh'
       }}>
-        <span>Memuat...</span>
+        <span>Memuat Sesi...</span>
       </div>
     );
   }
@@ -155,11 +153,12 @@ function AppRoutes() {
           }
         />
 
-        {/* 🛠️ GITHUB INTEGRATIONS */}
+        {/* 🛠️ GITHUB INTEGRATIONS
+            FIX: Diperluas agar mencakup seluruh role multi-tenant yang membutuhkan koordinasi Git & Kanban */}
         <Route
           path="/github-integrations"
           element={
-            <AllowedRolesRoute allowedRoles={['superadmin', 'teamdeveloper', 'businessanalyst']}>
+            <AllowedRolesRoute allowedRoles={['superadmin', 'admin', 'projectowner', 'productowner', 'businessanalyst', 'teamdeveloper']}>
               <GitHubIntegrations />
             </AllowedRolesRoute>
           }

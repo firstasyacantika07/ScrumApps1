@@ -19,10 +19,12 @@ const GitHubIntegrations = () => {
     setTimeout(() => setToast({ show: false, msg: "", type: "" }), 3000);
   };
 
+  // FIX 1: Sesuaikan endpoint ke rute baru pusat (/api/github/requests atau /api/projects/github/requests)
+  // Tergantung pada prefix route base di file server Anda (misal: app.use('/api/github', githubRoutes))
   const fetchRequests = async () => {
     try {
       setLoading(true);
-      const res = await api.get("/projects/github/requests");
+      const res = await api.get("/github/requests"); 
       setRequests(Array.isArray(res.data) ? res.data : res.data?.data || []);
     } catch (error) {
       console.error(error);
@@ -32,15 +34,15 @@ const GitHubIntegrations = () => {
     }
   };
 
-  // FIX 1: Tangani redirect balik dari GitHub OAuth (success/error di query param)
+  // Tangani redirect balik dari GitHub OAuth (success/error di query param)
   useEffect(() => {
     const success = searchParams.get("success");
     const error   = searchParams.get("error");
 
     if (success === "connected") {
       showToast("Repositori GitHub berhasil terhubung!", "success");
-      // Bersihkan query param dari URL tanpa reload
       navigate("/github-integrations", { replace: true });
+      fetchRequests();
     } else if (error) {
       const errorMessages = {
         oauth_denied:      "Otentikasi GitHub dibatalkan oleh pengguna.",
@@ -58,15 +60,12 @@ const GitHubIntegrations = () => {
     fetchRequests();
   }, []);
 
-  // FIX 2: Panggil PUT /approve dulu untuk update status DB,
-  // lalu redirect ke oauth_url yang dikembalikan backend.
-  // Sebelumnya langsung GET oauth-url tanpa approve → status DB tidak pernah diupdate.
+  // Panggil PUT /requests/:id/approve untuk perbarui status DB dan dapatkan oauth_url
   const handleApproveAndConnect = async (requestId) => {
     try {
       showToast("Memproses persetujuan...", "success");
 
-      // Step 1: Approve di DB → backend kembalikan oauth_url
-      const approveRes = await api.put(`/projects/github/requests/${requestId}/approve`);
+      const approveRes = await api.put(`/github/requests/${requestId}/approve`);
       const oauthUrl = approveRes.data?.oauth_url;
 
       if (!oauthUrl) {
@@ -77,7 +76,6 @@ const GitHubIntegrations = () => {
       showToast("Mengarahkan ke otentikasi GitHub...", "success");
       sessionStorage.setItem("pending_request_id", requestId);
 
-      // Step 2: Redirect ke GitHub OAuth
       setTimeout(() => {
         window.location.href = oauthUrl;
       }, 800);
@@ -94,7 +92,7 @@ const GitHubIntegrations = () => {
   const handleReject = async (id) => {
     if (!window.confirm("Tolak pengajuan integrasi repositori ini?")) return;
     try {
-      await api.put(`/projects/github/requests/${id}/reject`);
+      await api.put(`/github/requests/${id}/reject`);
       showToast("Pengajuan berhasil ditolak", "success");
       fetchRequests();
     } catch (error) {
@@ -103,12 +101,11 @@ const GitHubIntegrations = () => {
     }
   };
 
-  // FIX 3: URL delete salah — /integrations/:id tidak ada di routes.
-  // Yang benar: DELETE /projects/github/:id (sesuai githubRoutes.js)
+  // FIX 2: Sesuaikan URL disconnect ke endpoint /github/:id murni (tanpa nested projects)
   const handleDisconnect = async (id) => {
     if (!window.confirm("Putuskan koneksi GitHub dari project ini? Otomatisasi Kanban akan terhenti.")) return;
     try {
-      await api.delete(`/projects/github/${id}`); // ← FIX: hapus '/integrations'
+      await api.delete(`/github/${id}`); 
       showToast("Koneksi repositori diputuskan", "success");
       fetchRequests();
     } catch (error) {
@@ -117,6 +114,7 @@ const GitHubIntegrations = () => {
     }
   };
 
+  // FIX 3: Sesuaikan endpoint konfigurasi webhook ke POST /github/project/:projectId/webhooks
   const handleConfigureWebhook = async (projectId) => {
     if (!projectId) {
       showToast("Gagal mengonfigurasi: Project ID tidak valid", "error");
@@ -124,14 +122,14 @@ const GitHubIntegrations = () => {
     }
     try {
       showToast("Mengonfigurasi webhook repositori...", "success");
-      const res = await api.post(`/projects/${projectId}/github-webhooks`);
+      const res = await api.post(`/github/project/${projectId}/webhooks`);
       if (res.data?.success || res.status === 200 || res.status === 201) {
         showToast("Webhook GitHub berhasil aktif!");
       }
     } catch (error) {
       if (error.response && error.response.status === 409) {
         showToast(
-          error.response.data?.message || "Webhook sudah aktif dan terkonfigurasi di repositori ini.", 
+          error.response.data?.message || "Webhook sudah aktif di repositori ini.", 
           "success"
         );
       } else {
@@ -149,7 +147,6 @@ const GitHubIntegrations = () => {
     return url.startsWith("http") ? url : `https://${url}`;
   };
 
-  // FIX 4: Tambah CONNECTED ke mapping status (backend simpan 'CONNECTED' bukan 'ACTIVE')
   const getStatusStyle = (status) => {
     switch (status) {
       case "CONNECTED":
@@ -255,6 +252,7 @@ const GitHubIntegrations = () => {
                   const isApproved  = currentStatus === "APPROVED";
                   const isRejected  = !isConnected && !isPending && !isApproved;
 
+                  // FIX 4: Mapping diselaraskan dengan alias SQL database (repository_owner & repository_name)
                   return (
                     <tr key={req.id} className="hover:bg-slate-50/40 transition-colors duration-150">
                       <td className="py-4 px-6 font-semibold text-slate-800">{req.project_name}</td>
@@ -297,7 +295,6 @@ const GitHubIntegrations = () => {
                             </>
                           )}
 
-                          {/* APPROVED — menunggu user selesaikan OAuth di GitHub */}
                           {isApproved && (
                             <span className="text-xs text-blue-500 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md font-medium italic">
                               Menunggu OAuth GitHub...
@@ -307,7 +304,7 @@ const GitHubIntegrations = () => {
                           {isConnected && (
                             <>
                               <button
-                                onClick={() => handleConfigureWebhook(req.project_id || req.id)}
+                                onClick={() => handleConfigureWebhook(req.project_id)}
                                 className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm text-xs font-semibold flex items-center gap-1.5"
                               >
                                 {Webhook && <Webhook size={13} className="text-slate-300" />} Sync Webhook

@@ -2,14 +2,12 @@
 const express = require('express');
 const router = express.Router();
 
-const db = require('../config/db');
-const bcrypt = require('bcryptjs');
+const userController = require('../controllers/userController');
 const invitationController = require('../controllers/invitationController');
-
 const { verifyToken } = require('../middleware/auth');
 
 // =========================================================================
-// RUTE PUBLIK (TIDAK Memerlukan Login / JWT Token)
+// 🔓 1. RUTE PUBLIK (TIDAK Memerlukan Login / JWT Token)
 // Calon pengguna baru mengakses rute ini dari tautan email mereka
 // =========================================================================
 
@@ -21,89 +19,35 @@ router.post('/invitations/accept', invitationController.acceptInvitation);
 
 
 // =========================================================================
-// MIDDLEWARE PROTEKSI
-// Semua rute di bawah baris ini wajib melampirkan JWT valid (Hanya untuk Admin/User terdaftar)
+// 🛡️ 2. MIDDLEWARE PROTEKSI
+// Semua rute di bawah baris ini wajib melampirkan JWT valid (Hanya untuk Admin/User)
 // =========================================================================
 router.use(verifyToken);
 
 
-// ================= POST INVITE USER =================
+// ================= ✉️ POST INVITE USER =================
 // Menangani: POST /api/users/invitations
 router.post('/invitations', invitationController.inviteUser);
 
-// ================= GET ALL USERS (SINKRONISASI SAAS MULTI-TENANT) =================
-router.get('/', async (req, res) => {
-  try {
-    // Ambil tenant_id dari user/admin yang sedang login (disediakan oleh middleware verifyToken)
-    const tenantId = req.user.tenant_id; 
+// ================= 🏢 GET USERS BY TENANT (SINKRONISASI SAAS MULTI-TENANT) =================
+// 🛠️ PERBAIKAN: Dialihkan ke userController agar ter-filter rapi berdasarkan tenant admin yang login
+router.get('/', userController.getUsersByTenant);
 
-    // Filter data agar hanya menampilkan user yang berada di perusahaan yang sama
-    const [users] = await db.query(`
-      SELECT id, name, email, role, phone_number, gender
-      FROM tbr_users
-      WHERE tenant_id = ?
-    `, [tenantId]);
-
-    res.json(users);
-  } catch (err) {
-    console.error("GET USERS ERROR:", err);
-    res.status(500).json({ 
-      success: false,
-      message: "Gagal mengambil daftar pengguna workspace.",
-      error: err.message 
-    });
-  }
-});
-
-// ================= CREATE USER (LEGACY) =================
+// ================= ➕ CREATE USER (LEGACY / DASHBOARD MODAL) =================
 // Menangani pembuatan user langsung lewat modal dashboard
-router.post('/', async (req, res) => {
-  try {
-    const { name, email, password, role, phone_number, gender } = req.body;
-    const tenantId = req.user.tenant_id; 
+router.post('/', userController.createUser);
 
-    if (!name || !email || !password || !role) {
-      return res.status(400).json({
-        success: false,
-        message: "Kolom Nama, Email, Password, dan Role wajib diisi!"
-      });
-    }
+// ================= 🗑️ DELETE / REVOKE USER =================
+router.delete('/:id', userController.deleteUser);
 
-    const [existing] = await db.query('SELECT id FROM tbr_users WHERE email = ?', [email]);
-    if (existing.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Email ini sudah terdaftar di sistem. Gunakan email lain."
-      });
-    }
-
-    const hash = await bcrypt.hash(password, 10);
-
-    await db.query(
-      `INSERT INTO tbr_users (name, email, password, role, phone_number, gender, tenant_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, email, hash, role, phone_number || null, gender || null, tenantId]
-    );
-
-    res.status(201).json({ 
-      success: true,
-      message: "User berhasil dibuat dan bergabung ke workspace Anda" 
-    });
-
-  } catch (err) {
-    console.error("❌ CREATE USER BACKEND CRASH:", err);
-    res.status(500).json({ 
-      success: false,
-      message: err.message || "Gagal membuat user baru akibat gangguan server." 
-    });
-  }
-});
-
-// ================= UPDATE USER =================
+// ================= ✏️ UPDATE USER =================
+// Menangani perubahan data profile user internal tim
 router.put('/:id', async (req, res) => {
   try {
     const { name, gender, email, phone_number, password } = req.body;
     const tenantId = req.user.tenant_id;
+    const db = require('../config/db');
+    const bcrypt = require('bcryptjs');
 
     let query = `
       UPDATE tbr_users
@@ -140,35 +84,6 @@ router.put('/:id', async (req, res) => {
     res.status(500).json({ 
       success: false,
       message: "Gagal memperbarui data user.",
-      error: err.message 
-    });
-  }
-});
-
-// ================= DELETE / REVOKE USER =================
-router.delete('/:id', async (req, res) => {
-  try {
-    const tenantId = req.user.tenant_id;
-
-    const [result] = await db.query('DELETE FROM tbr_users WHERE id=? AND tenant_id=?', [req.params.id, tenantId]);
-    
-    if (result.affectedRows === 0) {
-      return res.status(403).json({ 
-        success: false,
-        message: "Akses ditolak atau user tidak ditemukan di workspace ini" 
-      });
-    }
-
-    res.json({ 
-      success: true,
-      message: "User berhasil dihapus dari workspace" 
-    });
-
-  } catch (err) {
-    console.error("DELETE USER ERROR:", err);
-    res.status(500).json({ 
-      success: false,
-      message: "Gagal menghapus user dari database.",
       error: err.message 
     });
   }

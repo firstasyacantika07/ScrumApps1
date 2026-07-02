@@ -48,6 +48,7 @@ const billingRoutes = require('./routes/billingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 
+const githubRoutes = require('./routes/githubRoutes');
 // Import tambahan untuk keperluan bypass controller & middleware
 const paymentController = require('./controllers/paymentController');
 const { verifyToken } = require('./middleware/auth');
@@ -65,9 +66,11 @@ app.use('/api/superadmin', superadminRoutes);
 
 // 📦 3. FITUR REGULAR & SUBSCRIPTION
 app.use('/api/projects', projectRoutes);
+app.use('/api/github', verifyToken, githubRoutes);
 app.use('/api/dashboard', verifyToken, dashboardRoutes);
 app.use('/api/billing', billingRoutes); 
 app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/workspace/billing', subscriptionRoutes);
 
 // 💡 BYPASS STRATEGY PAYMENT
 app.post('/api/payment/create-transaction', verifyToken, paymentController.createPayment);

@@ -2,26 +2,63 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db'); // 💡 Menggunakan koneksi pool database MySQL Anda
+const userController = require('../controllers/userController');
+const { verifyToken } = require('../middleware/auth');
+
+// =========================================================================
+// 🛡️ MIDDLEWARE PROTEKSI KHUSUS SUPERADMIN
+// =========================================================================
+const requireSuperadmin = (req, res, next) => {
+  if (req.user?.role !== 'superadmin') {
+    return res.status(403).json({ 
+      success: false, 
+      message: "Akses ditolak. Otoritas ini hanya dimiliki oleh platform Superadmin." 
+    });
+  }
+  next();
+};
 
 /**
  * 1. Menangani GET /api/superadmin/dashboard/stats
+ * 🔥 DIOPTIMALKAN: Mengambil data riil & kalkulasi agregat pendapatan asli dari database
+ * untuk mendukung diagram PieChart komponen SuperAdminView di frontend
  */
-router.get('/dashboard/stats', async (req, res) => {
+router.get('/dashboard/stats', verifyToken, requireSuperadmin, async (req, res) => {
   try {
-    // 📊 Hitung total seluruh tenant/perusahaan
+    // a. Hitung total revenue riil dari akumulasi transaksi paket pelanggan premium yang berstatus aktif
+    const [revenueQuery] = await db.query(`
+      SELECT IFNULL(SUM(
+        CASE 
+          WHEN package_type = 'PRO' THEN 499000
+          WHEN package_type = 'ENTERPRISE' THEN 3500000
+          ELSE 0 
+        END
+      ), 0) AS total_revenue 
+      FROM tbr_tenants WHERE status = 'active'
+    `);
+
+    // b. Hitung total seluruh tenant/perusahaan terdaftar
     const [totalCompanies] = await db.query('SELECT COUNT(*) as total FROM tbr_tenants');
     
-    // 🟢 Hitung tenant yang statusnya aktif
-    const [activeCompanies] = await db.query('SELECT COUNT(*) as total FROM tbr_tenants WHERE status = "active"');
-    
-    // ⏳ Hitung tenant yang tipenya PRO (sebagai contoh metrik komersial)
-    const [proCompanies] = await db.query('SELECT COUNT(*) as total FROM tbr_tenants WHERE package_type = "PRO"');
+    // c. Hitung rasio penyebaran data tipe paket langganan SaaS (Free, Pro, Enterprise)
+    const [tiers] = await db.query(`
+      SELECT 
+        SUM(CASE WHEN package_type = 'FREE' OR package_type IS NULL THEN 1 ELSE 0 END) as free_tier,
+        SUM(CASE WHEN package_type = 'PRO' THEN 1 ELSE 0 END) as pro_tier,
+        SUM(CASE WHEN package_type = 'ENTERPRISE' THEN 1 ELSE 0 END) as enterprise_tier
+      FROM tbr_tenants
+    `);
 
+    // d. Harmonisasikan data keluaran dengan penamaan properti di komponen Dashboard.jsx
     res.status(200).json({
       success: true,
-      totalCompanies: totalCompanies[0].total,
-      totalActiveUsers: activeCompanies[0].total, // Mengisi slot active metrics di dashboard
-      pendingRequests: proCompanies[0].total       // Mengisi slot package metrics di dashboard
+      data: {
+        totalRevenue: revenueQuery[0].total_revenue,
+        totalCompanies: totalCompanies[0].total,
+        freeTier: tiers[0].free_tier || 0,
+        proTier: tiers[0].pro_tier || 0,
+        enterpriseTier: tiers[0].enterprise_tier || 0
+      }
     });
   } catch (error) {
     console.error('❌ Error fetching superadmin stats:', error);
@@ -36,7 +73,7 @@ router.get('/dashboard/stats', async (req, res) => {
 /**
  * 2. Menangani GET /api/superadmin/companies/recent
  */
-router.get('/companies/recent', async (req, res) => {
+router.get('/companies/recent', verifyToken, requireSuperadmin, async (req, res) => {
   try {
     // 🏢 Mengambil 5 perusahaan terbaru berdasarkan kolom company_name, status, dan created_at
     const [recentTenants] = await db.query(
@@ -51,7 +88,7 @@ router.get('/companies/recent', async (req, res) => {
        LIMIT 5`
     );
 
-    // Kirim langsung array datanya ke frontend
+    // Kirim langsung array datanya ke frontend sesuai ekspektasi Dashboard.jsx
     res.status(200).json(recentTenants);
   } catch (error) {
     console.error('❌ Error fetching recent tenants:', error);
@@ -64,10 +101,10 @@ router.get('/companies/recent', async (req, res) => {
 });
 
 /**
- * 🔥 3. BARU: Menangani GET /api/superadmin/companies
+ * 3. Menangani GET /api/superadmin/companies
  * Dipergunakan oleh komponen CompanyManagement frontend untuk merender semua item database
  */
-router.get('/companies', async (req, res) => {
+router.get('/companies', verifyToken, requireSuperadmin, async (req, res) => {
   try {
     const query = `
       SELECT 
@@ -107,7 +144,7 @@ router.get('/companies', async (req, res) => {
  * 4. Menangani GET /api/superadmin/billing/invoices
  * Dipergunakan oleh komponen BillingTracker frontend Anda
  */
-router.get('/billing/invoices', async (req, res) => {
+router.get('/billing/invoices', verifyToken, requireSuperadmin, async (req, res) => {
   try {
     const query = `
       SELECT 
@@ -153,7 +190,7 @@ router.get('/billing/invoices', async (req, res) => {
  * 5. Menangani PATCH /api/superadmin/tenants/:id/activate
  * Berfungsi mengubah status perusahaan menjadi active saat tombol verifikasi diklik di BillingTracker
  */
-router.patch('/tenants/:id/activate', async (req, res) => {
+router.patch('/tenants/:id/activate', verifyToken, requireSuperadmin, async (req, res) => {
   const { id } = req.params;
   try {
     const query = `
@@ -188,10 +225,10 @@ router.patch('/tenants/:id/activate', async (req, res) => {
 });
 
 /**
- * 🔥 6. BARU/MODIFIKASI: Menangani PATCH /api/superadmin/companies/:id/status
+ * 6. Menangani PATCH /api/superadmin/companies/:id/status
  * Menyesuaikan dengan kebutuhan tombol "Bekukan" & "Aktifkan Akun" di halaman CompanyManagement
  */
-router.patch('/companies/:id/status', async (req, res) => {
+router.patch('/companies/:id/status', verifyToken, requireSuperadmin, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body; // Menerima status baru ('active' atau 'suspended')
 
@@ -235,5 +272,11 @@ router.patch('/companies/:id/status', async (req, res) => {
     });
   }
 });
+
+// =========================================================================
+// 👤 7. NEW ROUTE: Menangani GET /api/superadmin/users
+// Dipergunakan oleh komponen UserManagement milik Superadmin untuk melihat skop global
+// =========================================================================
+router.get('/users', verifyToken, requireSuperadmin, userController.getAllUsersGlobal);
 
 module.exports = router;

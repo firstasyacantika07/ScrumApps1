@@ -14,9 +14,77 @@ const { verifyToken, authorize } = require('../middleware/auth');
  */
 router.use(verifyToken);
 
+
 // ======================================================
-// 📊 PLANS ENDPOINTS
+// 📊 PLANS & STATUS ENDPOINTS (TARUH STATIS DI ATAS)
 // ======================================================
+
+/**
+ * 🔥 TAMBAHAN AKSI: Mengambil status billing/langganan paket tenant aktif saat ini
+ * Merespon: GET http://localhost:5000/api/workspace/billing/status
+ */
+router.get("/status", async (req, res) => {
+    try {
+        const tenantId = req.user.tenant_id;
+
+        if (!tenantId) {
+            return res.status(400).json({
+                success: false,
+                message: "Tenant ID tidak ditemukan pada sesi token Anda."
+            });
+        }
+
+        // Ambil informasi paket langganan aktif dari tabel tbr_tenants
+        const [tenantRows] = await db.query(
+            `SELECT id, company_name, package_type, expires_at 
+             FROM tbr_tenants 
+             WHERE id = ?`, 
+            [tenantId]
+        );
+
+        if (tenantRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Data workspace / organisasi tidak ditemukan."
+            });
+        }
+
+        const tenant = tenantRows[0];
+
+        // Definisikan kapasitas benefit static berdasarkan package_type sebagai fallback UI frontend
+        let maxProjects = 1;
+        let maxTeamMembers = 5;
+
+        if (String(tenant.package_type).toLowerCase() === 'pro') {
+            maxProjects = 15;
+            maxTeamMembers = 25;
+        } else if (String(tenant.package_type).toLowerCase() === 'enterprise') {
+            maxProjects = 999;
+            maxTeamMembers = 999;
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                tenant_id: tenant.id,
+                company_name: tenant.company_name,
+                package_type: tenant.package_type || 'FREE',
+                expires_at: tenant.expires_at || null,
+                constraints: {
+                    max_projects: maxProjects,
+                    max_team_members: maxTeamMembers
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("GET WORKSPACE BILLING STATUS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Terjadi kesalahan internal server saat memuat status langganan."
+        });
+    }
+});
 
 /**
  * 🎯 GET: Ambil semua daftar paket (Plans) dari database
@@ -76,7 +144,6 @@ router.post('/subscription/activate', paymentController.activatePlan);
  */
 router.get('/history', authorize('Superadmin'), async (req, res) => {
     try {
-        // Integrasikan dengan tbr_payment jika ingin mengambil data riwayat asli dari DB
         const [history] = await db.query(
             `SELECT * FROM tbr_payment ORDER BY created_at DESC LIMIT 50`
         );
@@ -96,16 +163,12 @@ router.get('/history', authorize('Superadmin'), async (req, res) => {
 });
 
 /**
- * ❌ DELETE: Batalkan/Hapus transaksi tertentu berdasarkan ID
+ * ❌ DELETE: Batalkan/Hapus transaksi tertentu berdasarkan ID (Ditaruh di paling bawah)
  * Endpoint: DELETE /api/billing/:id
  */
 router.delete('/:id', async (req, res) => {
     try {
         const { id } = req.params;
-
-        // Simulasi atau eksekusi query hapus/update status ke database
-        // await db.query(`UPDATE tbr_payment SET payment_status = 'CANCELLED' WHERE id = ?`, [id]);
-
         return res.status(200).json({
             success: true,
             message: `Transaksi dengan id ${id} berhasil dibatalkan`
