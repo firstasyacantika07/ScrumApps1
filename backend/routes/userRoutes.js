@@ -1,4 +1,3 @@
-// routes/userRoutes.js
 const express = require('express');
 const router = express.Router();
 
@@ -6,10 +5,10 @@ const userController = require('../controllers/userController');
 const invitationController = require('../controllers/invitationController');
 const { verifyToken } = require('../middleware/auth');
 
-// =========================================================================
-// 🔓 1. RUTE PUBLIK (TIDAK Memerlukan Login / JWT Token)
-// Calon pengguna baru mengakses rute ini dari tautan email mereka
-// =========================================================================
+/* =========================================================================
+   🔓 1. PUBLIC ROUTES (TANPA TOKEN JWT)
+   Harus di paling atas agar tidak sengaja tertelan oleh wildcard /:id di bawah
+   ========================================================================= */
 
 // Menangani: GET /api/users/invitations/verify?token=xyz
 router.get('/invitations/verify', invitationController.verifyInvitation);
@@ -18,30 +17,37 @@ router.get('/invitations/verify', invitationController.verifyInvitation);
 router.post('/invitations/accept', invitationController.acceptInvitation);
 
 
-// =========================================================================
-// 🛡️ 2. MIDDLEWARE PROTEKSI
-// Semua rute di bawah baris ini wajib melampirkan JWT valid (Hanya untuk Admin/User)
-// =========================================================================
+/* =========================================================================
+   🛡️ MIDDLEWARE PROTEKSI GLOBAL
+   Semua rute di bawah baris ini wajib melampirkan JWT valid pada header
+   ========================================================================= */
 router.use(verifyToken);
 
 
-// ================= ✉️ POST INVITE USER =================
-// Menangani: POST /api/users/invitations
-router.post('/invitations', invitationController.inviteUser);
+/* =========================================================================
+   🔒 2. PROTECTED BASE ROUTES (BASE API: /api/users)
+   Rute statis/akar wajib didahulukan sebelum rute berbasis parameter /:id
+   ========================================================================= */
 
-// ================= 🏢 GET USERS BY TENANT (SINKRONISASI SAAS MULTI-TENANT) =================
-// 🛠️ PERBAIKAN: Dialihkan ke userController agar ter-filter rapi berdasarkan tenant admin yang login
+// 🏢 GET: Mengambil list seluruh anggota tim berdasarkan tenant yang sedang aktif login
+// Merespon request dari Users.jsx frontend
 router.get('/', userController.getUsersByTenant);
 
-// ================= ➕ CREATE USER (LEGACY / DASHBOARD MODAL) =================
-// Menangani pembuatan user langsung lewat modal dashboard
+// ➕ POST: Membuat user baru via modal dashboard internal workspace
 router.post('/', userController.createUser);
 
-// ================= 🗑️ DELETE / REVOKE USER =================
+// ✉️ POST: Mengirimkan undangan email bergabung ke user baru
+router.post('/invitations', invitationController.inviteUser);
+
+
+/* =========================================================================
+   🗂️ 3. DYNAMIC PARAMETER ROUTES (WILDCARD - MUTLAK DI PALING BAWAH)
+   ========================================================================= */
+
+// 🗑️ DELETE: Menghapus / mencabut hak akses user tertentu berdasarkan ID
 router.delete('/:id', userController.deleteUser);
 
-// ================= ✏️ UPDATE USER =================
-// Menangani perubahan data profile user internal tim
+// ✏️ PUT: Menangani perubahan data profil pengguna internal tim
 router.put('/:id', async (req, res) => {
   try {
     const { name, gender, email, phone_number, password } = req.body;
@@ -49,11 +55,17 @@ router.put('/:id', async (req, res) => {
     const db = require('../config/db');
     const bcrypt = require('bcryptjs');
 
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: "Tenant ID tidak teridentifikasi pada sesi Anda."
+      });
+    }
+
     let query = `
       UPDATE tbr_users
       SET name=?, gender=?, email=?, phone_number=?
     `;
-
     let params = [name, gender, email, phone_number];
 
     if (password) {
@@ -70,18 +82,18 @@ router.put('/:id', async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(403).json({ 
         success: false,
-        message: "Akses ditolak atau user tidak ditemukan di workspace ini" 
+        message: "Akses ditolak atau user tidak ditemukan di workspace ini." 
       });
     }
 
-    res.json({ 
+    return res.status(200).json({ 
       success: true,
       message: "Data user berhasil diperbarui" 
     });
 
   } catch (err) {
     console.error("UPDATE USER ERROR:", err);
-    res.status(500).json({ 
+    return res.status(500).json({ 
       success: false,
       message: "Gagal memperbarui data user.",
       error: err.message 

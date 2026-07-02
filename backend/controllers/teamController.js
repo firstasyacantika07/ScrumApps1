@@ -7,7 +7,18 @@ exports.addTeamMember = async (req, res) => {
   try {
     const { projectId } = req.params;
     const { user_id, role } = req.body;
-    const tenantId = req.user.tenant_id; // Diambil dari JWT verifyToken
+    const tenantId = req.user?.tenant_id; // Diambil dari JWT verifyToken
+
+    // 🛠️ FIX: cegah bind parameter undefined -> mysql2 crash jadi 500 mentah
+    if (!projectId || isNaN(projectId)) {
+      return res.status(400).json({ message: "ID Proyek tidak valid." });
+    }
+    if (!user_id) {
+      return res.status(400).json({ message: "user_id wajib diisi." });
+    }
+    if (!tenantId) {
+      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun." });
+    }
 
     // Validasi Keamanan: Pastikan proyek yang dituju benar-block milik tenant Admin yang login
     const [projectCheck] = await db.query(
@@ -52,7 +63,17 @@ exports.addTeamMember = async (req, res) => {
 exports.getTeamByProject = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const tenantId = req.user.tenant_id;
+    const tenantId = req.user?.tenant_id;
+
+    // 🛠️ FIX: mysql2 akan throw "Bind parameters must not contain undefined"
+    // (jadi 500 tanpa pesan jelas) kalau projectId atau tenantId undefined.
+    // Validasi dulu di sini supaya errornya jelas & tidak meng-crash query.
+    if (!projectId || isNaN(projectId)) {
+      return res.status(400).json({ message: "ID Proyek tidak valid." });
+    }
+    if (!tenantId) {
+      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun. Silakan hubungi administrator." });
+    }
 
     // Pastikan proyek milik tenant bersangkutan sebelum menarik data tim
     const [projectCheck] = await db.query(
@@ -86,7 +107,15 @@ exports.updateTeamMember = async (req, res) => {
   try {
     const { projectId, memberId } = req.params;
     const { role } = req.body;
-    const tenantId = req.user.tenant_id;
+    const tenantId = req.user?.tenant_id;
+
+    // 🛠️ FIX: cegah bind parameter undefined -> mysql2 crash jadi 500 mentah
+    if (!projectId || isNaN(projectId) || !memberId || isNaN(memberId)) {
+      return res.status(400).json({ message: "ID Proyek atau ID Anggota tidak valid." });
+    }
+    if (!tenantId) {
+      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun." });
+    }
 
     // Validasi berlapis: Pastikan member yang di-update berada di dalam proyek milik tenant yang sah
     const [validCheck] = await db.query(
@@ -120,7 +149,15 @@ exports.updateTeamMember = async (req, res) => {
 exports.deleteTeamMember = async (req, res) => {
   try {
     const { projectId, memberId } = req.params;
-    const tenantId = req.user.tenant_id;
+    const tenantId = req.user?.tenant_id;
+
+    // 🛠️ FIX: cegah bind parameter undefined -> mysql2 crash jadi 500 mentah
+    if (!projectId || isNaN(projectId) || !memberId || isNaN(memberId)) {
+      return res.status(400).json({ message: "ID Proyek atau ID Anggota tidak valid." });
+    }
+    if (!tenantId) {
+      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun." });
+    }
 
     // Validasi berlapis sebelum eksekusi hapus data tim
     const [validCheck] = await db.query(

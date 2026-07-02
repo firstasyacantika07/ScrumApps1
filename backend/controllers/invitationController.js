@@ -25,13 +25,16 @@ const transporter = nodemailer.createTransport({
 // ======================================================
 exports.inviteUser = async (req, res) => {
   try {
-    const { email, role } = req.body;
+    let { email, role } = req.body;
     const tenantId = req.user?.tenant_id; 
     const companyName = req.user?.company_name || "Organisasi Partner"; 
 
     if (!email || !role) {
       return res.status(400).json({ success: false, message: "Email dan Role wajib ditentukan." });
     }
+
+    // 🔧 FIX: Normalisasi email (trim + lowercase) agar konsisten saat dicocokkan nanti
+    email = email.trim().toLowerCase();
 
     // A. Validasi apakah email sudah terdaftar sebagai user aktif
     const [existingUser] = await db.query('SELECT id FROM tbr_users WHERE email = ?', [email]);
@@ -151,6 +154,8 @@ exports.verifyInvitation = async (req, res) => {
   }
 };
 
+const jwt = require("jsonwebtoken");
+
 // ======================================================
 // 👤 3. ACCEPT INVITATION (Registrasi Anggota Tim & Update State)
 // ======================================================
@@ -162,6 +167,9 @@ exports.acceptInvitation = async (req, res) => {
     if (!token || !name || !password) {
       return res.status(400).json({ success: false, message: "Seluruh data profil wajib diisi." });
     }
+
+    // 🔧 FIX: Trim password (jaga-jaga ada spasi tak sengaja dari input form)
+    const cleanPassword = password.trim();
 
     const [invitations] = await connection.query('SELECT * FROM tbr_invitations WHERE token = ?', [token]);
     if (invitations.length === 0) {
@@ -177,20 +185,43 @@ exports.acceptInvitation = async (req, res) => {
     await connection.beginTransaction();
 
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(cleanPassword, salt);
 
-    await connection.query(
+    // 🔧 FIX: Normalisasi ulang email dari data invitation (jaga-jaga data lama belum trim/lowercase)
+    const cleanEmail = invitation.email.trim().toLowerCase();
+
+    const [insertResult] = await connection.query(
       `INSERT INTO tbr_users (name, email, password, role, tenant_id) VALUES (?, ?, ?, ?, ?)`,
-      [name, invitation.email, hashedPassword, invitation.role, invitation.tenant_id]
+      [name, cleanEmail, hashedPassword, invitation.role, invitation.tenant_id]
     );
 
     await connection.query('UPDATE tbr_invitations SET status = "accepted" WHERE id = ?', [invitation.id]);
 
     await connection.commit();
 
+    // 🔧 FIX: Generate token JWT supaya frontend bisa langsung auto-login
+    // dan diarahkan sesuai role (lewat AllowedRolesRoute di App.jsx)
+    const jwtToken = jwt.sign(
+      {
+        id: insertResult.insertId,
+        role: invitation.role,
+        tenant_id: invitation.tenant_id,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
     return res.status(201).json({
       success: true,
-      message: "Berhasil bergabung! Akun tim Anda telah aktif, silakan lakukan login.",
+      message: "Berhasil bergabung! Akun tim Anda telah aktif.",
+      token: jwtToken,
+      user: {
+        id: insertResult.insertId,
+        name,
+        email: cleanEmail,
+        role: invitation.role,
+        tenant_id: invitation.tenant_id,
+      },
     });
   } catch (error) {
     await connection.rollback();

@@ -5,6 +5,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 const helmet = require('helmet');
 const midtransClient = require('midtrans-client');
+const path = require('path'); 
 
 const app = express();
 
@@ -13,9 +14,9 @@ const app = express();
 ========================================================= */
 
 const snap = new midtransClient.Snap({
-  isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
-  serverKey: process.env.MIDTRANS_SERVER_KEY,
-  clientKey: process.env.MIDTRANS_CLIENT_KEY
+    isProduction: process.env.MIDTRANS_IS_PRODUCTION === 'true',
+    serverKey: process.env.MIDTRANS_SERVER_KEY,
+    clientKey: process.env.MIDTRANS_CLIENT_KEY
 });
 
 /* =========================================================
@@ -25,9 +26,9 @@ const snap = new midtransClient.Snap({
 app.use(cors());
 
 app.use(
-  helmet({
-    crossOriginResourcePolicy: false
-  })
+    helmet({
+        crossOriginResourcePolicy: false
+    })
 );
 
 app.use(express.json());
@@ -47,9 +48,11 @@ const superadminRoutes = require('./routes/superadminRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
-
+const notificationRoutes = require('./routes/notificationRoutes');
+const invitationRoutes = require('./routes/invitationRoutes');
 const githubRoutes = require('./routes/githubRoutes');
-// Import tambahan untuk keperluan bypass controller & middleware
+
+const { startCronJobs } = require('./cron/cronService');
 const paymentController = require('./controllers/paymentController');
 const { verifyToken } = require('./middleware/auth');
 
@@ -57,22 +60,18 @@ const { verifyToken } = require('./middleware/auth');
    API ROUTES
 ========================================================= */
 
-// 👑 1. ROUTE UTAMA & AUTENTIKASI (Tanpa Wildcard Menggantung)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-
-// 👑 2. SUPERADMIN ROUTES (Ditaruh di atas agar tidak sengaja termakan rute dinamis billing/project)
 app.use('/api/superadmin', superadminRoutes);
-
-// 📦 3. FITUR REGULAR & SUBSCRIPTION
 app.use('/api/projects', projectRoutes);
 app.use('/api/github', verifyToken, githubRoutes);
 app.use('/api/dashboard', verifyToken, dashboardRoutes);
 app.use('/api/billing', billingRoutes); 
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/workspace/billing', subscriptionRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/invitations', invitationRoutes);
 
-// 💡 BYPASS STRATEGY PAYMENT
 app.post('/api/payment/create-transaction', verifyToken, paymentController.createPayment);
 app.use('/api/payment', paymentRoutes);
 
@@ -81,65 +80,86 @@ app.use('/api/payment', paymentRoutes);
 ========================================================= */
 
 app.get('/', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'API ScrumApps berjalan 🚀',
-    environment:
-      process.env.MIDTRANS_IS_PRODUCTION === 'true'
-        ? 'Production'
-        : 'Sandbox',
-    serverTime: new Date()
-  });
+    return res.status(200).json({
+        success: true,
+        message: 'API ScrumApps berjalan 🚀',
+        environment: process.env.MIDTRANS_IS_PRODUCTION === 'true' ? 'Production' : 'Sandbox',
+        serverTime: new Date()
+    });
+});
+
+app.get('/api/test-midtrans', async (req, res) => {
+    try {
+        const parameter = {
+            transaction_details: {
+                order_id: `ORDER-${Date.now()}`,
+                gross_amount: 10000
+            },
+            credit_card: {
+                secure: true
+            },
+            customer_details: {
+                first_name: 'ScrumApps',
+                email: 'test@scrumapps.com'
+            }
+        };
+
+        const transaction = await snap.createTransaction(parameter);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Midtrans connected successfully',
+            token: transaction.token,
+            redirect_url: transaction.redirect_url
+        });
+    } catch (error) {
+        console.error('Midtrans Error:', error.message);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed connect to Midtrans',
+            error: error.message
+        });
+    }
 });
 
 /* =========================================================
-   MIDTRANS TEST ROUTE
+   SAFETY REDIRECT: /accept-invite
+   (Jaga-jaga jika link undangan ter-klik lewat domain
+   backend ini, misalnya karena FRONTEND_URL di .env belum
+   benar. Route ini meneruskan ke FRONTEND_URL yang sebenarnya
+   beserta query string token-nya, alih-alih jatuh ke 404.)
 ========================================================= */
 
-app.get('/api/test-midtrans', async (req, res) => {
-  try {
-    const parameter = {
-      transaction_details: {
-        order_id: `ORDER-${Date.now()}`,
-        gross_amount: 10000
-      },
-      credit_card: {
-        secure: true
-      },
-      customer_details: {
-        first_name: 'ScrumApps',
-        email: 'test@scrumapps.com'
-      }
-    };
+app.get('/accept-invite', (req, res) => {
+    const realFrontendUrl = process.env.REAL_FRONTEND_URL || process.env.FRONTEND_URL;
 
-    const transaction = await snap.createTransaction(parameter);
+    if (!realFrontendUrl || realFrontendUrl.includes(req.hostname)) {
+        return res.status(500).json({
+            success: false,
+            message: 'FRONTEND_URL belum dikonfigurasi dengan benar di .env (masih mengarah ke domain backend). Set REAL_FRONTEND_URL ke domain tempat aplikasi React berjalan.'
+        });
+    }
 
-    res.status(200).json({
-      success: true,
-      message: 'Midtrans connected successfully',
-      token: transaction.token,
-      redirect_url: transaction.redirect_url
-    });
-  } catch (error) {
-    console.error('Midtrans Error:', error.message);
+    const queryString = req.originalUrl.split('?')[1];
+    const target = queryString
+        ? `${realFrontendUrl}/accept-invite?${queryString}`
+        : `${realFrontendUrl}/accept-invite`;
 
-    res.status(500).json({
-      success: false,
-      message: 'Failed connect to Midtrans',
-      error: error.message
-    });
-  }
+    return res.redirect(302, target);
 });
 
 /* =========================================================
    404 HANDLER
+   (Backend ini hanya melayani API. Frontend React/Vite
+   berjalan terpisah dari backend, jadi tidak ada static
+   fallback ke folder dist/ di sini.)
 ========================================================= */
 
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Endpoint tidak ditemukan'
-  });
+    return res.status(404).json({
+        success: false,
+        message: 'Endpoint tidak ditemukan'
+    });
 });
 
 /* =========================================================
@@ -147,13 +167,12 @@ app.use((req, res) => {
 ========================================================= */
 
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-
-  res.status(500).json({
-    success: false,
-    message: 'Internal Server Error',
-    error: err.message
-  });
+    console.error(err.stack);
+    return res.status(500).json({
+        success: false,
+        message: 'Internal Server Error',
+        error: err.message
+    });
 });
 
 /* =========================================================
@@ -163,16 +182,13 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`
+    startCronJobs();
+    console.log(`
 ==================================================
 🚀 ScrumApps Backend Running
 ==================================================
 🌐 URL         : http://localhost:${PORT}
-🛡️ Environment : ${
-    process.env.MIDTRANS_IS_PRODUCTION === 'true'
-      ? 'PRODUCTION'
-      : 'SANDBOX'
-  }
+🛡️ Environment : ${process.env.MIDTRANS_IS_PRODUCTION === 'true' ? 'PRODUCTION' : 'SANDBOX'}
 💳 Midtrans    : Connected
 ==================================================
 `);

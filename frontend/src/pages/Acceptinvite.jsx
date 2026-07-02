@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { User, Lock, Phone, Eye, EyeOff, CheckCircle, ShieldAlert, KeyRound } from 'lucide-react';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 const AcceptInvite = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { login } = useAuth();
   const token = searchParams.get('token');
 
   // State Manajemen Form
@@ -37,7 +39,7 @@ const AcceptInvite = () => {
     const verifyToken = async () => {
       try {
         // Ganti endpoint ini sesuai dengan arsitektur backend invitations-mu
-        const res = await api.get(`/users/invitations/verify?token=${token}`);
+        const res = await api.get(`/invitations/verify?token=${token}`);
         setInvitedEmail(res.data?.data?.email || res.data?.email);
         setAssignedRole(res.data?.data?.role || res.data?.role);
         setIsValidToken(true);
@@ -66,7 +68,7 @@ const AcceptInvite = () => {
     try {
       setLoading(true);
       // Kirim payload lengkap beserta token aktivasi ke backend
-      await api.post('/users/invitations/accept', {
+      const res = await api.post('/invitations/accept', {
         token,
         name: formData.name,
         phone_number: formData.phone_number,
@@ -74,8 +76,15 @@ const AcceptInvite = () => {
         password: formData.password
       });
 
-      alert("Registrasi berhasil! Akun Anda telah aktif di Workspace.");
-      navigate('/login');
+      // 🔧 FIX: Auto-login pakai token dari backend, lalu arahkan ke dashboard
+      // (akses menu/halaman selanjutnya otomatis terbatas sesuai role lewat AllowedRolesRoute)
+      if (res.data?.token) {
+        login(res.data.token, res.data.user);
+        navigate('/dashboard');
+      } else {
+        alert("Registrasi berhasil! Silakan login.");
+        navigate('/login');
+      }
     } catch (err) {
       console.error("ACCEPT INVITATION ERROR:", err);
       setErrorMsg(err?.response?.data?.message || "Gagal mengaktivasi akun. Silakan coba lagi.");

@@ -73,7 +73,7 @@ const Dashboard = () => {
         // ======================================================
         } else if (roleLower.includes('admin')) {
           const [billingRes, projectRes] = await Promise.all([
-            api.get('/workspace/billing/status').catch(err => {
+            api.get('/billing/status').catch(err => {
               console.warn("Billing status error:", err.message);
               return { data: { data: {} } };
             }),

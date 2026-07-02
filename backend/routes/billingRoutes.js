@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const db = require("../config/db");
 
-// Import Controller yang telah kita buat sebelumnya
+// Import Controller
 const paymentController = require('../controllers/paymentController');
 
-// Middleware auth (pastikan path ini sesuai dengan struktur project Anda)
+// Middleware auth
 const { verifyToken, authorize } = require('../middleware/auth');
 
 /**
@@ -14,18 +14,17 @@ const { verifyToken, authorize } = require('../middleware/auth');
  */
 router.use(verifyToken);
 
-
 // ======================================================
-// 📊 PLANS & STATUS ENDPOINTS (TARUH STATIS DI ATAS)
+// 📊 PLANS & STATUS ENDPOINTS
 // ======================================================
 
 /**
- * 🔥 TAMBAHAN AKSI: Mengambil status billing/langganan paket tenant aktif saat ini
- * Merespon: GET http://localhost:5000/api/workspace/billing/status
+ * 🔥 Mengambil status billing/langganan paket tenant aktif saat ini beserta utilisasi kuota
+ * Endpoint: GET /api/workspace/billing/status
  */
 router.get("/status", async (req, res) => {
     try {
-        const tenantId = req.user.tenant_id;
+        const tenantId = req.user?.tenant_id;
 
         if (!tenantId) {
             return res.status(400).json({
@@ -34,11 +33,9 @@ router.get("/status", async (req, res) => {
             });
         }
 
-        // Ambil informasi paket langganan aktif dari tabel tbr_tenants
+        // 1. Ambil informasi dasar tenant/perusahaan
         const [tenantRows] = await db.query(
-            `SELECT id, company_name, package_type, expires_at 
-             FROM tbr_tenants 
-             WHERE id = ?`, 
+            `SELECT id, company_name FROM tbr_tenants WHERE id = ?`, 
             [tenantId]
         );
 
@@ -51,28 +48,55 @@ router.get("/status", async (req, res) => {
 
         const tenant = tenantRows[0];
 
-        // Definisikan kapasitas benefit static berdasarkan package_type sebagai fallback UI frontend
-        let maxProjects = 1;
-        let maxTeamMembers = 5;
+        // 2. Ambil data langganan dari object user (session/token)
+        const packageType = (req.user.package_type || 'FREE').toUpperCase();
+        const billingCycle = req.user.billing_cycle || 'NONE';
+        const trialEnd = req.user.trial_end;
+        const subscriptionEndsAt = req.user.subscription_ends_at;
 
-        if (String(tenant.package_type).toLowerCase() === 'pro') {
-            maxProjects = 15;
-            maxTeamMembers = 25;
-        } else if (String(tenant.package_type).toLowerCase() === 'enterprise') {
-            maxProjects = 999;
-            maxTeamMembers = 999;
+        // 3. Hitung sisa hari aktif langganan
+        let remainingDays = 0;
+        const referenceEndDate = billingCycle === 'TRIAL' ? trialEnd : subscriptionEndsAt;
+        if (referenceEndDate) {
+            const diffMs = new Date(referenceEndDate).getTime() - Date.now();
+            remainingDays = diffMs > 0 ? Math.ceil(diffMs / (1000 * 60 * 60 * 24)) : 0;
         }
+
+        // 4. Hitung jumlah project yang sudah digunakan
+        const [projectRows] = await db.query(
+            'SELECT COUNT(*) as total FROM tbr_projects WHERE tenant_id = ?',
+            [tenantId]
+        );
+        const projectUsed = projectRows[0]?.total || 0;
+
+        // 5. Hitung jumlah anggota tim yang sudah terdaftar
+        const [teamRows] = await db.query(
+            'SELECT COUNT(*) as total FROM tbr_users WHERE tenant_id = ?',
+            [tenantId]
+        );
+        const teamUsed = teamRows[0]?.total || 0;
+
+        // 🔒 Batas kuota konsisten dengan middleware/SubscriptionsMiddleware.js
+        const PACKAGE_LIMITS = {
+            FREE: { project: 1, team: 5 },
+            PRO: { project: 15, team: 25 },
+            ENTERPRISE: { project: 999, team: 999 } // Diubah dari null ke 999 agar konsisten dengan fallback UI numerik
+        };
+        const limits = PACKAGE_LIMITS[packageType] || PACKAGE_LIMITS.FREE;
 
         return res.status(200).json({
             success: true,
             data: {
                 tenant_id: tenant.id,
                 company_name: tenant.company_name,
-                package_type: tenant.package_type || 'FREE',
-                expires_at: tenant.expires_at || null,
+                package_type: packageType,
+                billing_cycle: billingCycle,
+                remaining_days: remainingDays,
                 constraints: {
-                    max_projects: maxProjects,
-                    max_team_members: maxTeamMembers
+                    project_used: projectUsed,
+                    project_limit: limits.project,
+                    team_used: teamUsed,
+                    team_limit: limits.team
                 }
             }
         });
@@ -163,7 +187,7 @@ router.get('/history', authorize('Superadmin'), async (req, res) => {
 });
 
 /**
- * ❌ DELETE: Batalkan/Hapus transaksi tertentu berdasarkan ID (Ditaruh di paling bawah)
+ * ❌ DELETE: Batalkan/Hapus transaksi tertentu berdasarkan ID
  * Endpoint: DELETE /api/billing/:id
  */
 router.delete('/:id', async (req, res) => {

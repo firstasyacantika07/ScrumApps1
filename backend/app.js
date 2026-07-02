@@ -1,4 +1,8 @@
 const nodemailer = require("nodemailer");
+const notificationRoutes = require('./routes/notificationRoutes');
+
+// Jika baris ini yang Anda gunakan:
+app.use('/api/notifications', notificationRoutes);
 
 async function sendEmail(to, subject, text) {
   const transporter = nodemailer.createTransport({

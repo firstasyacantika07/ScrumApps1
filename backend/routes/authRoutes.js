@@ -4,7 +4,6 @@ const router = express.Router();
 // Impor controller & middleware bawaan project Anda
 const authController = require("../controllers/authController");
 const { verifyToken } = require("../middleware/auth");
-const invitationController = require('../controllers/invitationController');
 
 // ======================================================
 // 🔐 AUTHENTICATION ROUTES
@@ -41,12 +40,38 @@ router.get("/me", verifyToken, (req, res, next) => {
   return authController.getMe(req, res, next);
 });
 
+/**
+ * @route   POST /api/auth/register
+ * @desc    Registrasi user baru + buat Tenant baru (auto-login setelah daftar)
+ * @access  Public
+ */
+router.post("/register", (req, res, next) => {
+  if (!authController?.register) {
+    return res.status(500).json({
+      success: false,
+      message: "Fungsi authController.register tidak ditemukan atau gagal diekspor",
+    });
+  }
+  return authController.register(req, res, next);
+});
+
+/**
+ * 🔍 DEBUG SEMENTARA — hapus route ini setelah masalah login selesai!
+ * @route   GET /api/auth/debug-users
+ */
+router.get("/debug-users", (req, res, next) => {
+  return authController.debugListUsers(req, res, next);
+});
+
 // ======================================================
 // ✉️ INVITATION ROUTES (WORKSPACE COLLABORATION)
 // ======================================================
-
-// 🛠️ PERBAIKAN: Nama fungsi disesuaikan dengan yang di-export oleh invitationController
-router.get('/invitations/verify', invitationController.verifyInvitation); 
-router.post('/invitations/accept', invitationController.acceptInvitation);
+// 🔧 FIX: Route invitation di sini DIHAPUS karena duplikat dengan
+// backend/routes/invitationRoutes.js (yang di-mount terpisah, biasanya
+// sebagai /api/invitations). Route di file ini sebelumnya tidak pernah
+// kepakai oleh frontend (jadi kode mati), tapi dibiarkan berisiko
+// membingungkan jika ada perubahan logic dilakukan di tempat yang salah.
+// Satu-satunya sumber kebenaran untuk route invitation sekarang ada di
+// backend/routes/invitationRoutes.js.
 
 module.exports = router;
