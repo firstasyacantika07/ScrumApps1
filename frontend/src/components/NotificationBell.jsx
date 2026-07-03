@@ -23,7 +23,15 @@ const NotificationBell = () => {
         console.error("Gagal mengambil notifikasi:", err);
       }
     };
-    fetchNotifications();
+
+    fetchNotifications(); // ambil data saat komponen pertama kali mount
+
+    // 🔄 POLLING: karena MainLayout hanya mount sekali untuk semua halaman,
+    // tanpa ini badge/dropdown tidak akan pernah update selama user
+    // berpindah-pindah halaman tanpa reload penuh.
+    const interval = setInterval(fetchNotifications, 30000); // tiap 30 detik
+
+    return () => clearInterval(interval); // bersihkan interval saat unmount
   }, []);
 
   const markAllAsRead = async () => {

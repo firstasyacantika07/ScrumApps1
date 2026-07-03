@@ -4,8 +4,15 @@ const axios = require('axios');
 
 /**
  * 🔒 INTERNAL HELPER: Memastikan Tenant Memiliki Paket PRO / ENTERPRISE
+ * 🔧 FIX: Superadmin di-bypass dari pengecekan ini -- mereka bertindak sebagai
+ * otoritas platform global, tidak terikat package_type tenant manapun.
+ * Sebelumnya req.user?.package_type untuk superadmin bisa undefined -> jatuh
+ * ke fallback 'FREE' -> superadmin ikut ke-block padahal seharusnya selalu
+ * boleh.
  */
 const checkGitHubPackagePermission = (req, res) => {
+    if (isPlatformSuperadmin(req.user?.role)) return true;
+
     const currentPackage = req.user?.package_type || 'FREE';
     if (currentPackage === 'FREE') {
         res.status(403).json({ 
@@ -34,13 +41,13 @@ const isPlatformSuperadmin = (role) => {
 
 /**
  * 🔒 INTERNAL HELPER: Apakah role ini termasuk manajer tingkat tenant
- * (Admin workspace, Admin2, Business Analyst, Project Owner)?
+ * (Admin workspace, Admin2, Business Analyst, Project Owner, Team Developer)?
  * Role-role ini HANYA boleh bertindak di dalam tenant mereka sendiri —
  * pemanggil wajib tetap memverifikasi kecocokan tenant_id secara terpisah.
  */
 const isTenantManagerRole = (role) => {
     const r = normalizeRole(role);
-    return ['admin', 'admin2', 'businessanalyst', 'projectowner'].includes(r);
+    return ['admin', 'admin2', 'businessanalyst', 'projectowner','teamdeveloper'].includes(r);
 };
 
 /**
@@ -60,9 +67,15 @@ const getIntegrationOwnerTenant = async (integrationId) => {
 
 /**
  * 🔒 INTERNAL HELPER: Validasi bahwa req.user berhak bertindak atas sebuah
- * integrasi tertentu — baik sebagai Superadmin (akses global) maupun sebagai
- * manajer tenant yang tenant_id-nya cocok dengan pemilik proyek integrasi itu.
- * Mengembalikan { authorized, integration, status, message }.
+ * integrasi tertentu.
+ *
+ * 🔧 FIX PERUBAHAN KEBIJAKAN: sebelumnya Admin/manajer tenant (role di
+ * isTenantManagerRole) juga diizinkan bertindak selama tenant_id cocok.
+ * Sekarang aksi approve / reject / disconnect / sync webhook di layar
+ * "Daftar Pengajuan Log Integrasi" DIKHUSUSKAN untuk Superadmin saja --
+ * Admin tenant hanya boleh MELIHAT daftar (lewat getAllIntegrationRequests),
+ * tidak boleh mengeksekusi aksi apapun di sini, walau itu tenant miliknya
+ * sendiri. Mengembalikan { authorized, integration, status, message }.
  */
 const authorizeIntegrationAction = async (req, integrationId) => {
     const integration = await getIntegrationOwnerTenant(integrationId);
@@ -71,20 +84,15 @@ const authorizeIntegrationAction = async (req, integrationId) => {
     }
 
     const role = req.user?.role;
-    const tenantId = req.user?.tenant_id;
 
     if (isPlatformSuperadmin(role)) {
-        return { authorized: true, integration };
-    }
-
-    if (isTenantManagerRole(role) && tenantId && tenantId === integration.tenant_id) {
         return { authorized: true, integration };
     }
 
     return {
         authorized: false,
         status: 403,
-        message: 'Akses Ditolak: Anda tidak memiliki otoritas atas integrasi repositori ini.'
+        message: 'Akses Ditolak: Aksi ini (approve/reject/sync webhook/disconnect) hanya dapat dilakukan oleh Superadmin.'
     };
 };
 
@@ -370,13 +378,24 @@ const getAllIntegrationRequests = async (req, res, next) => {
         let query;
         let params = [];
 
+        // 🔧 FIX: Tambahkan JOIN ke tbr_tenants supaya frontend bisa menampilkan
+        // kolom "Tenant" per baris -- terutama penting untuk Superadmin yang
+        // melihat data LINTAS tenant (tanpa ini, tidak ada cara membedakan
+        // integrasi itu milik tenant/workspace mana dari tampilan tabelnya).
+        // LEFT JOIN (bukan INNER) supaya baris integrasi TETAP muncul walau
+        // datanya tidak sengaja tidak konsisten (mis. tenant_id yatim/sudah
+        // dihapus) -- lebih baik kelihatan "Tanpa Nama Tenant" daripada baris
+        // integrasi hilang total dari daftar.
         if (isPlatformSuperadmin(userRole)) {
             query = `
                 SELECT gi.id, gi.project_id, p.name AS project_name, gi.requester_name, 
                        gi.github_owner AS repository_owner, gi.github_repo AS repository_name, 
-                       gi.repository_url, gi.status 
+                       gi.repository_url, gi.status,
+                       p.tenant_id, 
+                       COALESCE(t.company_name, t.subdomain, CONCAT('Tenant #', p.tenant_id)) AS tenant_name
                 FROM tbr_github_integrations gi
                 JOIN tbr_projects p ON gi.project_id = p.id
+                LEFT JOIN tbr_tenants t ON p.tenant_id = t.id
                 ORDER BY gi.created_at DESC
             `;
         } else {
@@ -388,9 +407,12 @@ const getAllIntegrationRequests = async (req, res, next) => {
             query = `
                 SELECT gi.id, gi.project_id, p.name AS project_name, gi.requester_name, 
                        gi.github_owner AS repository_owner, gi.github_repo AS repository_name, 
-                       gi.repository_url, gi.status 
+                       gi.repository_url, gi.status,
+                       p.tenant_id,
+                       COALESCE(t.company_name, t.subdomain, CONCAT('Tenant #', p.tenant_id)) AS tenant_name
                 FROM tbr_github_integrations gi
                 JOIN tbr_projects p ON gi.project_id = p.id
+                LEFT JOIN tbr_tenants t ON p.tenant_id = t.id
                 WHERE p.tenant_id = ?
                 ORDER BY gi.created_at DESC
             `;
@@ -612,12 +634,20 @@ const syncBacklogWithGitHub = async (req, res, next) => {
 const configureWebhook = async (req, res, next) => {
     try {
         const { projectId } = req.params;
-        const tenantId = req.user.tenant_id;
+
+        // 🔧 FIX PERUBAHAN KEBIJAKAN: sebelumnya endpoint ini dibuka untuk
+        // Admin tenant selama project_id itu ada di tenant_id miliknya.
+        // Sekarang "Sync Webhook" di layar Daftar Pengajuan Log Integrasi
+        // DIKHUSUSKAN untuk Superadmin saja, konsisten dengan
+        // authorizeIntegrationAction (approve/reject/disconnect).
+        if (!isPlatformSuperadmin(req.user?.role)) {
+            return res.status(403).json({ success: false, message: 'Akses Ditolak: Sinkronisasi webhook hanya dapat dilakukan oleh Superadmin.' });
+        }
 
         if (!checkGitHubPackagePermission(req, res)) return;
 
-        const [projectCheck] = await db.query('SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?', [projectId, tenantId]);
-        if (projectCheck.length === 0) return res.status(403).json({ success: false, message: 'Akses Ilegal.' });
+        const [projectCheck] = await db.query('SELECT id FROM tbr_projects WHERE id = ?', [projectId]);
+        if (projectCheck.length === 0) return res.status(404).json({ success: false, message: 'Proyek tidak ditemukan.' });
 
         const [integrations] = await db.query(
             'SELECT id, github_owner, github_repo, access_token FROM tbr_github_integrations WHERE project_id = ? AND status = "Active" LIMIT 1',

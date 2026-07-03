@@ -409,7 +409,7 @@ exports.handleMidtransWebhook = async (req, res) => {
       SET
         package_type = ?,
         billing_cycle = ?,
-        subscription_status = 'active',
+        status = 'active',
         subscription_ends_at = ?,
         is_trial = 0,
         updated_at = NOW()
@@ -518,7 +518,7 @@ exports.startTrial = async (req, res) => {
         is_trial = 1,
         package_type = 'PRO',
         billing_cycle = 'TRIAL',
-        subscription_status = 'trialing',
+        status = 'trial',
         trial_start = ?,
         trial_end = ?,
         subscription_ends_at = ?,
@@ -636,7 +636,7 @@ exports.activatePlan = async (req, res) => {
       SET
         package_type = ?,
         billing_cycle = ?,
-        subscription_status = 'active',
+        status = 'active',
         subscription_ends_at = ?,
         is_trial = 0,
         updated_at = NOW()
@@ -713,7 +713,7 @@ exports.getBillingStatus = async (req, res) => {
 
     // Ambil data langganan langsung dari sumber kebenaran utama (tbr_tenants)
     const [tenants] = await db.query(
-      `SELECT package_type, billing_cycle, subscription_status, subscription_ends_at, is_trial 
+      `SELECT package_type, billing_cycle, status, subscription_ends_at, is_trial 
        FROM tbr_tenants WHERE id = ?`,
       [tenantId]
     );
@@ -732,7 +732,7 @@ exports.getBillingStatus = async (req, res) => {
       data: {
         packageType: tenant.package_type || "FREE",
         billingCycle: tenant.billing_cycle || "MONTHLY",
-        status: tenant.subscription_status || "active",
+        status: tenant.status || "active",
         endsAt: tenant.subscription_ends_at,
         isTrial: tenant.is_trial === 1 || tenant.is_trial === true
       }

@@ -167,11 +167,26 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {isRole('superadmin') && <SuperAdminView saasStats={saasStats} recentCompanies={recentData} navigate={navigate} />}
-      {isRole('admin') && <AdminWorkspaceView workspaceStats={workspaceStats} recentProjects={recentData} navigate={navigate} />}
-      {isRole('projectowner') && <ProjectOwnerView scrumStats={scrumStats} recentProjects={recentData} navigate={navigate} />}
-      {isRole('analyst') && <BusinessAnalystView scrumStats={scrumStats} recentProjects={recentData} navigate={navigate} />}
-      {isRole('developer') && <DeveloperView scrumStats={scrumStats} recentProjects={recentData} navigate={navigate} />}
+      {/* 🛠️ FIX BUG #1: sebelumnya pakai beberapa && berurutan, sehingga role
+          "superadmin" ikut ter-match oleh isRole('admin') (substring 'admin'
+          ada di dalam 'superadmin') dan 2 dashboard tampil bersamaan.
+          Sekarang pakai if-else chain agar hanya SATU view yang pernah dirender,
+          urutan dari yang paling spesifik ke paling umum. */}
+      {isRole('superadmin') ? (
+        <SuperAdminView saasStats={saasStats} recentCompanies={recentData} navigate={navigate} />
+      ) : isRole('projectowner') ? (
+        <ProjectOwnerView scrumStats={scrumStats} recentProjects={recentData} navigate={navigate} />
+      ) : isRole('admin') ? (
+        <AdminWorkspaceView workspaceStats={workspaceStats} recentProjects={recentData} navigate={navigate} />
+      ) : isRole('analyst') ? (
+        <BusinessAnalystView scrumStats={scrumStats} recentProjects={recentData} navigate={navigate} />
+      ) : isRole('developer') ? (
+        <DeveloperView scrumStats={scrumStats} recentProjects={recentData} navigate={navigate} />
+      ) : (
+        <div className="text-center py-20 text-xs font-bold text-slate-400 uppercase tracking-wider">
+          Role akun Anda belum memiliki tampilan dashboard.
+        </div>
+      )}
     </div>
   );
 };
@@ -475,6 +490,49 @@ const BusinessAnalystView = ({ scrumStats, recentProjects, navigate }) => {
    5. TEAM DEVELOPER VIEW
    ========================================================================== */
 const DeveloperView = ({ scrumStats, recentProjects, navigate }) => {
+  // 🆕 State untuk fitur "Kirim Reminder Manual" ke akun PO tertentu.
+  const [poList, setPoList] = useState([]);
+  const [loadingPoList, setLoadingPoList] = useState(false);
+  const [selectedPoId, setSelectedPoId] = useState('');
+  const [sendingReminder, setSendingReminder] = useState(false);
+  const [reminderResult, setReminderResult] = useState(null); // { type: 'success'|'error', text }
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchPoList = async () => {
+      try {
+        setLoadingPoList(true);
+        const res = await api.get('/users');
+        const data = res.data?.data || res.data || [];
+        // 🆕 Hanya tampilkan akun dengan role Product Owner di dropdown ini.
+        const owners = (Array.isArray(data) ? data : []).filter(
+          (u) => String(u.role || '').toLowerCase().replace(/_/g, '') === 'projectowner'
+        );
+        if (isMounted) setPoList(owners);
+      } catch (err) {
+        console.warn('Gagal memuat daftar PO untuk reminder:', err.message);
+      } finally {
+        if (isMounted) setLoadingPoList(false);
+      }
+    };
+    fetchPoList();
+    return () => { isMounted = false; };
+  }, []);
+
+  const handleSendReminder = async () => {
+    if (!selectedPoId) return;
+    try {
+      setSendingReminder(true);
+      setReminderResult(null);
+      const res = await api.post('/notifications/trigger-sprint-check', { userId: Number(selectedPoId) });
+      setReminderResult({ type: 'success', text: res.data?.message || 'Reminder terkirim.' });
+    } catch (err) {
+      setReminderResult({ type: 'error', text: err.response?.data?.message || 'Gagal mengirim reminder.' });
+    } finally {
+      setSendingReminder(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -492,7 +550,7 @@ const DeveloperView = ({ scrumStats, recentProjects, navigate }) => {
           </div>
           <div className="space-y-3">
             {recentProjects.length > 0 ? recentProjects.slice(0, 5).map((p) => (
-              <div key={p.id} onClick={() => navigate('/kanban')} className="flex items-center justify-between p-5 rounded-2xl bg-slate-50 hover:bg-white border border-slate-100 cursor-pointer transition-all gap-4">
+              <div key={p.id} onClick={() => navigate(`/projects/${p.id}`)} className="flex items-center justify-between p-5 rounded-2xl bg-slate-50 hover:bg-white border border-slate-100 cursor-pointer transition-all gap-4">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center font-black border border-amber-100">
                     {(p.name || p.title || 'T').charAt(0).toUpperCase()}
@@ -510,25 +568,69 @@ const DeveloperView = ({ scrumStats, recentProjects, navigate }) => {
           </div>
         </div>
 
-        <div className="lg:col-span-4 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-slate-800 mb-4">
-              <GitBranch className="text-slate-900" size={20} />
-              <h4 className="text-xs font-black uppercase tracking-[1px]">Integrasi GitHub Feed</h4>
-            </div>
-            <p className="text-[11px] font-bold text-slate-400 mb-6">Aktivitas repository terhubung otomatis berdasarkan Webhook yang aktif.</p>
-            
-            <div className="space-y-3">
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-[11px] opacity-60">
-                <p className="font-black text-slate-700">Terhubung ke repository</p>
-                <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Status: Aktif Mendengarkan</p>
+        <div className="lg:col-span-4 flex flex-col gap-6">
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-slate-800 mb-4">
+                <GitBranch className="text-slate-900" size={20} />
+                <h4 className="text-xs font-black uppercase tracking-[1px]">Integrasi GitHub Feed</h4>
+              </div>
+              <p className="text-[11px] font-bold text-slate-400 mb-6">Aktivitas repository terhubung otomatis berdasarkan Webhook yang aktif.</p>
+
+              <div className="space-y-3">
+                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-[11px] opacity-60">
+                  <p className="font-black text-slate-700">Terhubung ke repository</p>
+                  <p className="text-[9px] text-slate-400 mt-1 uppercase font-bold">Status: Aktif Mendengarkan</p>
+                </div>
               </div>
             </div>
+            {/* ✅ FIX: Arahkan ke halaman GitHub Integrations yang sudah ada */}
+            <button onClick={() => navigate('/github-integrations')} className="w-full mt-6 py-3 border border-slate-200 rounded-xl text-[10px] font-black uppercase text-slate-700 tracking-wider hover:bg-slate-50 transition-colors">
+              Konfigurasi Webhook Repository
+            </button>
           </div>
-          {/* ✅ FIX: Arahkan ke halaman GitHub Integrations yang sudah ada */}
-          <button onClick={() => navigate('/github-integrations')} className="w-full mt-6 py-3 border border-slate-200 rounded-xl text-[10px] font-black uppercase text-slate-700 tracking-wider hover:bg-slate-50 transition-colors">
-            Konfigurasi Webhook Repository
-          </button>
+
+          {/* 🆕 KIRIM REMINDER MANUAL KE PO */}
+          <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col gap-4">
+            <div className="flex items-center gap-2 text-slate-800">
+              <Clock className="text-slate-900" size={20} />
+              <h4 className="text-xs font-black uppercase tracking-[1px]">Kirim Reminder Sprint Manual</h4>
+            </div>
+            <p className="text-[11px] font-bold text-slate-400 -mt-2">Pilih akun Product Owner untuk dikirimi email pengingat sprint secara manual.</p>
+
+            <select
+              value={selectedPoId}
+              onChange={(e) => { setSelectedPoId(e.target.value); setReminderResult(null); }}
+              disabled={loadingPoList}
+              className="w-full border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+            >
+              <option value="" disabled>
+                {loadingPoList ? 'Memuat akun PO...' : 'Pilih Akun PO'}
+              </option>
+              {poList.map((po) => (
+                <option key={po.id} value={po.id}>
+                  {po.name} {po.email ? `(${po.email})` : ''}
+                </option>
+              ))}
+            </select>
+            {!loadingPoList && poList.length === 0 && (
+              <p className="text-[10px] text-amber-600 font-bold">Belum ada akun dengan role Product Owner.</p>
+            )}
+
+            <button
+              onClick={handleSendReminder}
+              disabled={!selectedPoId || sendingReminder}
+              className="w-full py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {sendingReminder ? 'Mengirim...' : 'Kirim Reminder'}
+            </button>
+
+            {reminderResult && (
+              <p className={`text-[10px] font-bold ${reminderResult.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                {reminderResult.text}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -23,6 +23,11 @@ const ProjectList = () => {
   const [upgradeModal, setUpgradeModal] = useState(false);
   const [modalReason, setModalReason] = useState(""); // "free_limit" atau "trial_expired"
 
+  // 🆕 Daftar akun kandidat Product Owner, diambil dari anggota tim yang sudah
+  // di-invite ke workspace (dipakai untuk dropdown "Akun PO" di modal Tambah Project)
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
   const [userData, setUserData] = useState(() => {
     return JSON.parse(localStorage.getItem("user") || "{}");
   });
@@ -33,6 +38,7 @@ const ProjectList = () => {
     name: "",
     status: "hold",
     label: "external", // Default value yang diwajibkan oleh database schema
+    owner_id: "", // 🆕 Akun yang akan dipatenkan sebagai Product Owner proyek ini
   };
 
   const [formData, setFormData] = useState(initialForm);
@@ -109,10 +115,28 @@ const ProjectList = () => {
     }
   };
 
+  // 🆕 Ambil daftar anggota tim (hasil invite) untuk diisi ke dropdown "Akun PO".
+  // Asumsi endpoint: GET /users (sesuai userRoutes.js). Sesuaikan URL-nya kalau
+  // daftar karyawan di halaman "Kelola Karyawan" ternyata memakai endpoint lain.
+  const fetchTeamMembers = async () => {
+    try {
+      setLoadingMembers(true);
+      const res = await api.get("/users");
+      const data = res.data?.data || res.data || [];
+      setTeamMembers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Fetch Team Members Error:", error);
+      showToast("Gagal memuat daftar anggota tim untuk PO", "error");
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
   useEffect(() => {
     const localUser = JSON.parse(localStorage.getItem("user") || "{}");
     setUserData(localUser);
     fetchProjects();
+    fetchTeamMembers();
   }, []);
 
   // ==========================
@@ -162,6 +186,13 @@ const ProjectList = () => {
       return;
     }
 
+    // 🆕 Akun PO wajib dipilih saat membuat project baru, supaya PO langsung
+    // tercatat sebagai member (RF-13.1) dan menerima notifikasi penugasan.
+    if (!isEdit && !formData.owner_id) {
+      showToast("Pilih Akun PO terlebih dahulu", "error");
+      return;
+    }
+
     // Bersihkan Tenant ID dari localStorage
     let cleanTenantId = userData?.tenant_id;
     if (!cleanTenantId || cleanTenantId === "NULL" || cleanTenantId === null) {
@@ -172,6 +203,12 @@ const ProjectList = () => {
       ...formData,
       tenant_id: Number(cleanTenantId)
     };
+
+    // owner_id hanya relevan saat membuat project baru (backend belum mendukung
+    // pemindahan PO lewat updateProject)
+    if (isEdit) {
+      delete payload.owner_id;
+    }
 
     try {
       if (isEdit) {
@@ -393,6 +430,32 @@ const ProjectList = () => {
               className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-700 font-medium"
             />
           </div>
+          {!isEdit && (
+            <div>
+              <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Akun PO</label>
+              <select
+                required
+                value={formData.owner_id}
+                onChange={(e) => setFormData({ ...formData, owner_id: e.target.value })}
+                disabled={loadingMembers}
+                className="w-full border rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 text-slate-700 font-medium"
+              >
+                <option value="" disabled>
+                  {loadingMembers ? "Memuat anggota tim..." : "Pilih Akun PO"}
+                </option>
+                {teamMembers.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} {member.email ? `(${member.email})` : ""}
+                  </option>
+                ))}
+              </select>
+              {!loadingMembers && teamMembers.length === 0 && (
+                <p className="text-[11px] text-amber-600 font-medium mt-1.5 ml-1">
+                  Belum ada anggota tim yang di-invite. Undang anggota terlebih dahulu di menu Kelola Karyawan.
+                </p>
+              )}
+            </div>
+          )}
           <div>
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 ml-1">Status Kinerja</label>
             <select

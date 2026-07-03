@@ -4,6 +4,7 @@ const db = require('../config/db');
 const { verifyToken } = require('../middleware/auth');
 const { sendEmail } = require('../services/emailService');
 const sprintReminderService = require('../cron/cronService');
+const notificationModel = require('../models/notificationModel');
 
 // =============================================
 // 1. GET NOTIFIKASI USER
@@ -11,15 +12,21 @@ const sprintReminderService = require('../cron/cronService');
 router.get('/', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const [notifications] = await db.query(
-      `SELECT id, title, message, type, is_read as isRead, 
-              DATE_FORMAT(created_at, '%d %b %Y, %H:%i') as time,
-              created_at as createdAt
-       FROM tbr_notifications 
-       WHERE user_id = ? 
-       ORDER BY created_at DESC`,
-      [userId]
-    );
+    const rows = await notificationModel.getByUser(userId, { limit: 100 });
+
+    // Format tetap sama seperti sebelumnya (isRead, time, createdAt)
+    // supaya NotificationBell.jsx tidak perlu diubah.
+    const notifications = rows.map(n => ({
+      id: n.id,
+      title: n.title,
+      message: n.message,
+      type: n.type,
+      isRead: n.is_read,
+      time: new Date(n.created_at).toLocaleString('id-ID', {
+        day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+      }),
+      createdAt: n.created_at
+    }));
 
     res.status(200).json({ success: true, data: notifications });
   } catch (err) {
@@ -34,10 +41,7 @@ router.get('/', verifyToken, async (req, res) => {
 router.patch('/read-all', verifyToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    await db.query(
-      `UPDATE tbr_notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0`,
-      [userId]
-    );
+    await notificationModel.markAllAsRead(userId);
 
     res.status(200).json({ success: true, message: "Semua notifikasi ditandai sudah dibaca" });
   } catch (err) {
@@ -54,12 +58,9 @@ router.patch('/read/:id', verifyToken, async (req, res) => {
     const userId = req.user.id;
     const { id } = req.params;
 
-    const [result] = await db.query(
-      `UPDATE tbr_notifications SET is_read = 1 WHERE id = ? AND user_id = ?`,
-      [id, userId]
-    );
+    const success = await notificationModel.markAsRead(id, userId);
 
-    if (result.affectedRows === 0) {
+    if (!success) {
       return res.status(404).json({ success: false, message: "Notifikasi tidak ditemukan" });
     }
 
@@ -77,11 +78,25 @@ router.patch('/read/:id', verifyToken, async (req, res) => {
 router.post('/trigger-sprint-check', verifyToken, async (req, res) => {
   try {
     console.log('⏰ Menjalankan trigger sprint check manual...');
-    const count = await sprintReminderService.checkAndSendReminders();
+    // 🔧 FIX: cronService.js meng-export `runSprintReminderJob`, bukan
+    // `checkAndSendReminders` (fungsi itu tidak pernah ada). Sebelumnya ini
+    // selalu melempar TypeError setiap endpoint ini dipanggil, sehingga
+    // trigger manual RF-14.1 selalu gagal total (500 Internal Server Error).
+    //
+    // 🆕 Terima `userId` opsional dari body -- dipakai fitur "Kirim Reminder
+    // Manual" di dashboard Team Developer untuk menyasar satu PO tertentu.
+    // Tanpa `userId`, perilaku lama tetap: proses semua PO yang sprint-nya
+    // akan berakhir < 3 hari.
+    const targetUserId = req.body?.userId ? Number(req.body.userId) : null;
+    const count = await sprintReminderService.runSprintReminderJob(targetUserId);
 
     res.status(200).json({
       success: true,
-      message: `Pengecekan sprint selesai. ${count} notifikasi dikirim.`,
+      message: count > 0
+        ? `Pengecekan sprint selesai. ${count} notifikasi dikirim.`
+        : targetUserId
+          ? `Tidak ada sprint yang akan berakhir dalam waktu dekat untuk PO ini.`
+          : `Pengecekan sprint selesai. 0 notifikasi dikirim.`,
       count,
     });
   } catch (error) {

@@ -47,7 +47,15 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 const superadminRoutes = require('./routes/superadminRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
-const subscriptionRoutes = require('./routes/subscriptionRoutes');
+// 🗑️ FIX (#8 - paket & pembayaran tidak sinkron): subscriptionRoutes/subscriptionController
+// dihapus dari sini. Ini adalah implementasi checkout & webhook Midtrans DUPLIKAT dari
+// paymentController.js, memakai tabel `transactions` (bukan `tbr_payments`) dan sempat
+// meng-update kolom `subscription_status` di tbr_tenants yang TIDAK ADA (kolom asli: `status`).
+// Frontend (Billing.jsx) sudah dikonfirmasi 100% memakai /api/payment/create-transaction
+// (paymentController.js), bukan controller ini -- jadi rute ini murni dead code yang
+// berbahaya untuk dibiarkan aktif (risiko: webhook Midtrans salah diarahkan ke sini di
+// masa depan akan membuat pembayaran sukses tapi paket tidak pernah ter-upgrade).
+// File subscriptionController.js/subscriptionRoutes.js boleh dihapus permanen dari project.
 const notificationRoutes = require('./routes/notificationRoutes');
 const invitationRoutes = require('./routes/invitationRoutes');
 const githubRoutes = require('./routes/githubRoutes');
@@ -67,8 +75,6 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/github', verifyToken, githubRoutes);
 app.use('/api/dashboard', verifyToken, dashboardRoutes);
 app.use('/api/billing', require('./routes/billingRoutes'));
-app.use('/api/subscription', subscriptionRoutes);
-app.use('/api/workspace/billing', subscriptionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/invitations', invitationRoutes);
 

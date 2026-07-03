@@ -29,8 +29,13 @@ api.interceptors.request.use(
 
     if (rawTenantId && rawTenantId !== 'NULL' && rawTenantId !== 'null') {
       config.headers['X-Tenant-ID'] = rawTenantId;
-    } else if (roleLower.includes('admin') || roleLower.includes('superadmin')) {
-      // 🔥 FALLBACK: Jika Superadmin memiliki tenant_id NULL di DB, bypass otomatis dengan ID '1'
+    } else if (roleLower === 'superadmin') {
+      // 🛠️ FIX: sebelumnya roleLower.includes('admin') ikut menangkap role
+      // "admin" biasa (tenant admin), sehingga admin workspace yang tenant_id-nya
+      // kosong di localStorage dipaksa memakai tenant_id '1' yang salah,
+      // menyebabkan semua data (billing, projects, dll) tampak kosong/0.
+      // Fallback hardcode ini sekarang HANYA untuk superadmin sejati (exact match),
+      // yang secara desain memang boleh tidak terikat tenant tertentu.
       config.headers['X-Tenant-ID'] = '1';
     } else {
       delete config.headers['X-Tenant-ID'];

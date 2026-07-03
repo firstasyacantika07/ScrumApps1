@@ -8,6 +8,7 @@ const Register = () => {
   const [formData, setFormData] = useState({ 
     name: '', 
     company_name: '', // 👈 Menambahkan field company_name untuk tabel tbr_tenants
+    phone_number: '', // 🔧 FIX: field nomor telepon agar tersimpan ke tbr_users
     email: '', 
     password: ''
   });
@@ -95,6 +96,16 @@ const Register = () => {
                 <Building2 size={20} />
               </div>
             </div>
+
+            {/* 🔧 FIX: Input Nomor Telepon agar tersimpan ke tbr_users */}
+            <input 
+              name="phone_number" 
+              type="tel" 
+              placeholder="Nomor Handphone (WhatsApp)" 
+              onChange={handleChange} 
+              required 
+              className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#D31217] outline-none transition-all" 
+            />
 
             {/* Input Email */}
             <input 

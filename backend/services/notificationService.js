@@ -123,56 +123,66 @@ const notificationService = {
 
   // RF-04: Pengguna menerima notifikasi status proyek saat late/terlambat
   // dan done/selesai.
+  // 🔧 CATATAN: khusus notifikasi status proyek ini SENGAJA tidak mengirim
+  // email -- hanya disimpan sebagai notifikasi in-app (lonceng website).
+  // Fitur lain (assignment, penghapusan proyek, pengingat sprint) tetap
+  // memakai dispatch() seperti sebelumnya dan tetap mengirim email.
   sendProjectStatusNotification: async ({ userId, email, userName, projectName, status, projectId = null }) => {
     const isLate = status === 'late';
     const statusLabel = isLate ? 'TERLAMBAT' : 'SELESAI';
-    const subject = `Update Status Proyek: ${projectName} (${statusLabel})`;
     const message = `Status proyek "${projectName}" telah diperbarui menjadi ${statusLabel}.`;
-    const html = buildEmailCard({
-      badgeLabel: isLate ? 'Proyek Terlambat' : 'Proyek Selesai',
-      badgeColor: isLate ? '#ee1e2d' : '#16a34a',
-      heading: isLate ? 'Proyek Melewati Tenggat Waktu' : 'Proyek Telah Selesai',
-      bodyHtml: isLate
-        ? `
-          <p>Halo, <strong>${userName}</strong></p>
-          <p>Proyek <strong>${projectName}</strong> kini berstatus <strong style="color:#ee1e2d;">TERLAMBAT</strong>. Mohon segera ditinjau agar progres kembali sesuai target.</p>
-        `
-        : `
-          <p>Halo, <strong>${userName}</strong></p>
-          <p>Selamat! Proyek <strong>${projectName}</strong> telah ditandai <strong style="color:#16a34a;">SELESAI</strong>. Terima kasih atas kerja keras seluruh tim.</p>
-        `,
-      ctaLabel: 'Lihat Detail Proyek',
-      ctaUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/projects`,
-    });
-    return dispatch({
-      userId, projectId, email, subject, html,
+
+    const notifId = await notificationModel.create({
+      userId,
+      projectId,
       type: 'project_status',
       title: `Status proyek: ${statusLabel}`,
       message
     });
+
+    return { emailSent: false, notifId };
   },
 
   // RF-14.1: Product Owner menerima notifikasi pengingat sprint akan
   // berakhir melalui email saat tenggat sprint kurang dari tiga hari.
   sendSprintReminderNotification: async ({ userId, email, userName, projectName, sprintName, daysLeft, projectId = null }) => {
-    const dayLabel = daysLeft === 0 ? 'hari ini' : `${daysLeft} hari lagi`;
-    const subject = `Pengingat Sprint: ${sprintName} akan berakhir ${dayLabel}`;
-    const message = `Sprint "${sprintName}" pada proyek "${projectName}" akan berakhir ${dayLabel}.`;
+    // 🔧 FIX: sebelumnya daysLeft negatif (sprint sudah lewat tenggat) tetap
+    // ditampilkan mentah sebagai "-2 hari lagi" yang membingungkan PO.
+    // Sekarang dibedakan jadi kondisi "terlambat" dengan copy & warna berbeda.
+    const isOverdue = daysLeft < 0;
+    const dayLabel = isOverdue
+      ? `sudah lewat ${Math.abs(daysLeft)} hari`
+      : daysLeft === 0
+        ? 'hari ini'
+        : `${daysLeft} hari lagi`;
+
+    const subject = isOverdue
+      ? `Sprint Terlambat: ${sprintName} sudah melewati tenggat waktu`
+      : `Pengingat Sprint: ${sprintName} akan berakhir ${dayLabel}`;
+    const message = isOverdue
+      ? `Sprint "${sprintName}" pada proyek "${projectName}" ${dayLabel} dari tenggat waktu.`
+      : `Sprint "${sprintName}" pada proyek "${projectName}" akan berakhir ${dayLabel}.`;
+
     const html = buildEmailCard({
-      badgeLabel: 'Pengingat Sprint',
-      badgeColor: '#f59e0b',
-      heading: `Sprint Berakhir ${dayLabel}`,
-      bodyHtml: `
-        <p>Halo, <strong>${userName}</strong></p>
-        <p>Sprint <strong>${sprintName}</strong> pada proyek <strong>${projectName}</strong> akan berakhir <strong style="color:#f59e0b;">${dayLabel}</strong>. Pastikan seluruh backlog dan tugas pada sprint ini sudah ditinjau sebelum tenggat waktu.</p>
-      `,
+      badgeLabel: isOverdue ? 'Sprint Terlambat' : 'Pengingat Sprint',
+      badgeColor: isOverdue ? '#ee1e2d' : '#f59e0b',
+      heading: isOverdue ? 'Sprint Melewati Tenggat Waktu' : `Sprint Berakhir ${dayLabel}`,
+      bodyHtml: isOverdue
+        ? `
+          <p>Halo, <strong>${userName}</strong></p>
+          <p>Sprint <strong>${sprintName}</strong> pada proyek <strong>${projectName}</strong> <strong style="color:#ee1e2d;">${dayLabel}</strong> dari tenggat waktu yang direncanakan. Segera perbarui status sprint atau sesuaikan jadwalnya.</p>
+        `
+        : `
+          <p>Halo, <strong>${userName}</strong></p>
+          <p>Sprint <strong>${sprintName}</strong> pada proyek <strong>${projectName}</strong> akan berakhir <strong style="color:#f59e0b;">${dayLabel}</strong>. Pastikan seluruh backlog dan tugas pada sprint ini sudah ditinjau sebelum tenggat waktu.</p>
+        `,
       ctaLabel: 'Buka Papan Sprint',
       ctaUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/projects`,
     });
     return dispatch({
       userId, projectId, email, subject, html,
-      type: 'sprint_reminder',
-      title: 'Pengingat sprint',
+      type: isOverdue ? 'sprint_overdue' : 'sprint_reminder',
+      title: isOverdue ? 'Sprint terlambat' : 'Pengingat sprint',
       message
     });
   },

@@ -6,15 +6,23 @@ const db = require("../config/db");
 const jwt = require("jsonwebtoken");
 
 // =========================================================================
-// 🚀 BYPASS AUTENTIKASI: Kredensial Langsung Sesuai File .env Anda
+// 🔧 FIX KEAMANAN KRITIS: kredensial SMTP sebelumnya hardcoded plaintext di source
+// code (email + App Password 16 digit) — kalau repo ini pernah/akan di-push ke
+// GitHub publik, App Password itu SUDAH BOCOR. Pindahkan ke .env dan SEGERA
+// revoke/generate ulang App Password yang lama di Google Account.
+// .env wajib punya: SMTP_USER=... , SMTP_PASS=...
 // =========================================================================
+if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+  console.warn("⚠️  SMTP_USER / SMTP_PASS belum di-set di .env — pengiriman email undangan akan gagal.");
+}
+
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 465,               // Menggunakan port 465 (SSL Murni)
   secure: true,            // Wajib TRUE untuk port 465
   auth: {
     user: 'navacantika93@gmail.com', // Email Anda langsung
-    pass: 'lemarxbjqepezppm'        // App Password 16 digit Anda langsung
+    pass: 'lemarxbjqepezppm' ,
   },
   tls: {
     rejectUnauthorized: false // Bypass verifikasi sertifikat lokal (sangat aman untuk localhost)
@@ -63,7 +71,9 @@ exports.inviteUser = async (req, res) => {
 
     // F. Desain Template Email Premium Bertema Merah Putih (#ee1e2d)
     const mailOptions = {
-      from: `"ScrumApps System" <navcantika93@gmail.com>`,
+      // 🔧 FIX: typo alamat pengirim sebelumnya beda dengan akun SMTP yang login (auth.user),
+      // sekarang dipakai variabel yang sama supaya konsisten dan tidak ditandai spam.
+      from: `"ScrumApps System" <${process.env.SMTP_USER}>`,
       to: email,
       subject: `Undangan Bergabung ke Workspace ${companyName}`,
       html: `
@@ -123,7 +133,15 @@ exports.verifyInvitation = async (req, res) => {
       return res.status(400).json({ success: false, message: "Token undangan tidak ditemukan." });
     }
 
-    const [invitations] = await db.query('SELECT * FROM tbr_invitations WHERE token = ?', [token]);
+    // 🔧 FIX: JOIN ke tbr_tenants agar nama perusahaan ikut diambil untuk ditampilkan
+    // di halaman aktivasi (AcceptInvite.jsx), tanpa mengubah struktur query lain.
+    const [invitations] = await db.query(
+      `SELECT i.*, t.company_name
+       FROM tbr_invitations i
+       LEFT JOIN tbr_tenants t ON i.tenant_id = t.id
+       WHERE i.token = ?`,
+      [token]
+    );
     
     if (invitations.length === 0) {
       return res.status(404).json({ success: false, message: "Tautan undangan tidak valid atau tidak terdaftar." });
@@ -146,7 +164,8 @@ exports.verifyInvitation = async (req, res) => {
       data: {
         email: invitation.email,
         role: invitation.role,
-        tenantId: invitation.tenant_id
+        tenantId: invitation.tenant_id,
+        companyName: invitation.company_name || "Organisasi Partner"
       }
     });
   } catch (error) {
@@ -159,9 +178,14 @@ exports.verifyInvitation = async (req, res) => {
 // 👤 3. ACCEPT INVITATION (Registrasi Anggota Tim & Auto-Join Project)
 // ======================================================
 exports.acceptInvitation = async (req, res) => {
-  const connection = await db.getConnection();
+  // 🔧 FIX: getConnection() dipindah ke dalam try — sebelumnya di luar try,
+  // sehingga jika pool koneksi habis/reject, error tidak tertangkap.
+  let connection;
   try {
-    const { token, name, password } = req.body;
+    connection = await db.getConnection();
+    // 🔧 FIX: Ambil juga phone_number & gender yang dikirim dari form AcceptInvite.jsx
+    // (sebelumnya diabaikan sehingga tidak pernah tersimpan ke tbr_users)
+    const { token, name, password, phone_number, gender } = req.body;
 
     if (!token || !name || !password) {
       return res.status(400).json({ success: false, message: "Seluruh data profil wajib diisi." });
@@ -187,28 +211,52 @@ exports.acceptInvitation = async (req, res) => {
     const cleanEmail = invitation.email.trim().toLowerCase();
 
     // A. Daftarkan User ke tabel tbr_users
+    // 🔧 FIX: Sertakan phone_number & gender agar data dari form ikut tersimpan.
+    // Catatan: kolom `gender` di tbr_users bertipe ENUM('male','female') NOT NULL tanpa default,
+    // jadi diberi fallback 'male' agar tidak menyebabkan query gagal apabila field kosong.
     const [insertResult] = await connection.query(
-      `INSERT INTO tbr_users (name, email, password, role, tenant_id) VALUES (?, ?, ?, ?, ?)`,
-      [name, cleanEmail, hashedPassword, invitation.role, invitation.tenant_id]
+      `INSERT INTO tbr_users (name, email, password, role, tenant_id, phone_number, gender) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [name, cleanEmail, hashedPassword, invitation.role, invitation.tenant_id, phone_number || null, gender || 'male']
     );
 
     const newUserId = insertResult.insertId;
 
     // 🔥 SINKRONISASI BARU: Otomatis daftarkan user baru ke project yang ada di tenant ini
     // (Bypass perlindungan agar saat pertama login dashboard tidak kosong melongpong)
-    const [activeProjects] = await connection.query(
-      `SELECT id FROM tbr_projects WHERE tenant_id = ?`, 
-      [invitation.tenant_id]
-    );
+    // 🔧 FIX: Kolom di tbr_project_members bernama `role_in_project`, BUKAN `role`.
+    // Sebelumnya insert ini selalu gagal (Unknown column 'role') setiap kali tenant
+    // sudah punya project, menyebabkan seluruh transaksi accept-invite di-rollback.
+    // 🔧 FIX TAMBAHAN: role_in_project ENUM hanya mengizinkan
+    // 'ProjectOwner' | 'BusinessAnalyst' | 'TeamDeveloper'. Role di luar itu (mis. Admin/Superadmin)
+    // tidak relevan untuk auto-sync per-project sehingga di-skip agar tidak menyebabkan error.
+    // 🔧 FIX CASING: sebelumnya invitation.role dicocokkan APA ADANYA ke VALID_PROJECT_ROLES,
+    // beda dengan teamController.js yang menormalisasi role (lowercase, tanpa spasi) sebelum
+    // dibandingkan/disimpan. Kalau saat invite role tersimpan dengan casing berbeda
+    // (mis. "projectowner" atau "Project Owner"), pencocokan lama gagal diam-diam dan
+    // user baru tidak pernah ter-assign ke project manapun. Sekarang dinormalisasi dulu.
+    const normalizeRole = (r) => (r ? String(r).replace(/\s+/g, '').toLowerCase().trim() : '');
+    const PROJECT_ROLE_MAP = {
+      projectowner: 'ProjectOwner',
+      businessanalyst: 'BusinessAnalyst',
+      teamdeveloper: 'TeamDeveloper',
+    };
+    const canonicalProjectRole = PROJECT_ROLE_MAP[normalizeRole(invitation.role)];
 
-    if (activeProjects.length > 0) {
-      // Susun query mass-insert ke tbr_project_members
-      const memberInsertValues = activeProjects.map(proj => [proj.id, newUserId, invitation.role]);
-      
-      await connection.query(
-        `INSERT INTO tbr_project_members (project_id, user_id, role) VALUES ?`,
-        [memberInsertValues]
+    if (canonicalProjectRole) {
+      const [activeProjects] = await connection.query(
+        `SELECT id FROM tbr_projects WHERE tenant_id = ?`, 
+        [invitation.tenant_id]
       );
+
+      if (activeProjects.length > 0) {
+        // Susun query mass-insert ke tbr_project_members
+        const memberInsertValues = activeProjects.map(proj => [proj.id, newUserId, canonicalProjectRole]);
+        
+        await connection.query(
+          `INSERT INTO tbr_project_members (project_id, user_id, role_in_project) VALUES ?`,
+          [memberInsertValues]
+        );
+      }
     }
 
     // B. Update status undangan menjadi accepted
@@ -240,7 +288,14 @@ exports.acceptInvitation = async (req, res) => {
       },
     });
   } catch (error) {
-    await connection.rollback();
+    // 🔧 FIX: guard `connection &&` — bisa saja error terjadi sebelum getConnection() berhasil
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (e) {
+        // transaksi mungkin belum dimulai, abaikan
+      }
+    }
     console.error("❌ ACCEPT INVITE ERROR:", error);
     
     if (error.code === 'ER_DUP_ENTRY') {
@@ -248,6 +303,6 @@ exports.acceptInvitation = async (req, res) => {
     }
     return res.status(500).json({ success: false, message: "Gagal memproses pembuatan akun tim baru." });
   } finally {
-    connection.release();
+    if (connection) connection.release();
   }
 };

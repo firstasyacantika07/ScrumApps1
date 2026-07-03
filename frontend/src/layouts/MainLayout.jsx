@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
-import { User, Bell, Search, LogOut } from 'lucide-react';
+import { User, Search, LogOut } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
+import NotificationBell from '../components/NotificationBell';
 
 // ✅ Import useAuth untuk ambil user & logout dari AuthContext
 import { useAuth } from '../context/AuthContext';
@@ -50,13 +51,8 @@ const MainLayout = () => {
           </div>
           
           <div className="flex items-center gap-6 ml-auto">
-            {/* Notification Icon dengan indikator merah */}
-            <div className="relative text-slate-400 cursor-pointer hover:text-slate-600 transition-colors">
-              <Bell size={22} />
-              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-[#ee1e2d] text-[10px] text-white">
-                3
-              </span>
-            </div>
+            {/* Notification Bell: dropdown notifikasi real dari API, muncul di semua halaman */}
+            <NotificationBell />
 
             {/* User Profile & Logout Dropdown */}
             <div className="relative">

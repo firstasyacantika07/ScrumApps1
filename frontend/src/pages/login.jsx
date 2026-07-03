@@ -148,7 +148,7 @@ const Login = () => {
               <div className="space-y-2">
                 <div className="flex justify-between items-center ml-1">
                   <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest">Kata Sandi</label>
-                  <Link to="#" className="text-[#D31217] text-xs font-bold hover:underline">Lupa sandi?</Link>
+                  <Link to="/forgot-password" className="text-[#D31217] text-xs font-bold hover:underline">Lupa sandi?</Link>
                 </div>
                 <div className="relative">
                   <input

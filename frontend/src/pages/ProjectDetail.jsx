@@ -198,12 +198,20 @@ const ProjectDetail = () => {
   }, [id, fetchProject, fetchGitHubStatus]);
 
   const isSuperAdmin = currentUser.role === 'SUPERADMIN';
+  // 🛠️ FIX: role 'ADMIN' sebelumnya tidak pernah dicek di sini, sehingga
+  // hasWriteAccess() SELALU false untuk Admin dan tombol "TAMBAH" di tab
+  // Vision Board & Backlog tidak pernah muncul untuk role Admin, walau
+  // backend (projectRoutes.js) sudah mengizinkan admin create/update kedua
+  // modul itu.
+  const isAdmin = currentUser.role === 'ADMIN';
   const isBA = currentUser.role === 'BUSINESSANALYST';
   const isProjectOwner = currentUser.role === 'PROJECTOWNER';
 
   const hasWriteAccess = () => {
+    // isProjectOwner tetap dibuat read-only di sini secara sengaja (lihat
+    // badge "Mode Pantau (Read-Only)" di bawah) — bukan bug, jadi tidak diubah.
     if (isProjectOwner) return false;
-    if (isSuperAdmin) return true;
+    if (isSuperAdmin || isAdmin) return true;
     if (isBA && (location.pathname.includes('vision-board') || location.pathname.includes('backlog'))) return true;
     
     return false;
@@ -338,7 +346,7 @@ const ProjectDetail = () => {
             <Route path="backlog" element={<Backlog projectId={id} currentRole={currentUser.role} />} />
             <Route path="sprint" element={<Sprint projectId={id} currentRole={currentUser.role} />} />
             <Route path="development" element={<Development projectId={id} currentRole={currentUser.role} />} />
-            <Route path="members" element={<Members projectId={id} currentRole={currentUser.role} />} />
+            <Route path="members" element={<Members projectId={id} currentRole={currentUser.role} currentUserId={currentUser.id} />} />
             <Route path="logs" element={<ActivityLogsInline projectId={id} currentRole={currentUser.role} />} /> 
           </Routes>
         </div>

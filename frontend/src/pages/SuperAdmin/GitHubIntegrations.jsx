@@ -10,6 +10,49 @@ const GitHubIntegrations = () => {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, msg: "", type: "" });
 
+  // 🔧 FIX: Deteksi role user yang login untuk membatasi tombol AKSI hanya
+  // untuk Superadmin (backend githubController.js sudah menolak permintaan
+  // approve/reject/sync-webhook/disconnect dari role selain superadmin --
+  // ini melengkapi sisi tampilan supaya Admin tidak lihat tombol yang
+  // ujungnya cuma akan gagal/403 kalau diklik).
+  //
+  // Karena struktur penyimpanan auth di project ini tidak dipastikan,
+  // fungsi ini coba beberapa pola localStorage yang umum dipakai secara
+  // berurutan. Kalau semuanya gagal, dianggap BUKAN superadmin (fail-safe:
+  // lebih aman menyembunyikan tombol daripada salah menampilkannya).
+  const getCurrentUserRole = () => {
+    // Pola 1: objek user tersimpan utuh, mis. localStorage.setItem('user', JSON.stringify(user))
+    try {
+      const userRaw = localStorage.getItem("user");
+      if (userRaw) {
+        const parsed = JSON.parse(userRaw);
+        if (parsed?.role) return String(parsed.role).toLowerCase();
+      }
+    } catch (e) {
+      // 'user' bukan JSON valid -> lanjut coba pola lain
+    }
+
+    // Pola 2: role disimpan langsung sebagai string
+    const directRole = localStorage.getItem("role");
+    if (directRole) return directRole.toLowerCase();
+
+    // Pola 3: decode payload JWT di localStorage 'token'
+    try {
+      const token = localStorage.getItem("token");
+      if (token && token.split(".").length === 3) {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        if (payload?.role) return String(payload.role).toLowerCase();
+      }
+    } catch (e) {
+      // token tidak valid / bukan JWT standar -> lanjut, biarkan return null di bawah
+    }
+
+    return null;
+  };
+
+  const currentUserRole = getCurrentUserRole();
+  const isSuperadmin = currentUserRole === "superadmin";
+
   const { 
     GitBranch, Loader2, Check, X, Link2Off, Webhook, Github, ArrowRight 
   } = Lucide;
@@ -238,6 +281,7 @@ const GitHubIntegrations = () => {
               <thead>
                 <tr className="bg-slate-50/70 border-b border-slate-100 text-slate-400 text-xs uppercase font-semibold tracking-wider">
                   <th className="py-3.5 px-6">Nama Project</th>
+                  <th className="py-3.5 px-6">Tenant</th>
                   <th className="py-3.5 px-6">Diajukan Oleh</th>
                   <th className="py-3.5 px-6">Repository</th>
                   <th className="py-3.5 px-6 text-center">Status</th>
@@ -256,6 +300,15 @@ const GitHubIntegrations = () => {
                   return (
                     <tr key={req.id} className="hover:bg-slate-50/40 transition-colors duration-150">
                       <td className="py-4 px-6 font-semibold text-slate-800">{req.project_name}</td>
+                      <td className="py-4 px-6 text-slate-500">
+                        {req.tenant_name ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                            {req.tenant_name}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-300 italic">Tanpa Nama Tenant</span>
+                        )}
+                      </td>
                       <td className="py-4 px-6 text-slate-500 font-medium">{req.requester_name || "Business Analyst"}</td>
                       <td className="py-4 px-6">
                         <a 
@@ -279,20 +332,27 @@ const GitHubIntegrations = () => {
                       <td className="py-4 px-6">
                         <div className="flex items-center justify-center gap-2">
                           {isPending && (
-                            <>
-                              <button
-                                onClick={() => handleApproveAndConnect(req.id)}
-                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm shadow-emerald-200 flex items-center gap-1 text-xs font-semibold"
-                              >
-                                {Check && <Check size={14} />} Connect Repo
-                              </button>
-                              <button
-                                onClick={() => handleReject(req.id)}
-                                className="bg-white hover:bg-rose-600 text-rose-600 hover:text-white px-3 py-1.5 rounded-lg border border-rose-200 hover:border-rose-600 transition-all duration-150 text-xs font-medium flex items-center gap-1"
-                              >
-                                {X && <X size={14} />} Reject Request
-                              </button>
-                            </>
+                            isSuperadmin ? (
+                              <>
+                                <button
+                                  onClick={() => handleApproveAndConnect(req.id)}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm shadow-emerald-200 flex items-center gap-1 text-xs font-semibold"
+                                >
+                                  {Check && <Check size={14} />} Connect Repo
+                                </button>
+                                <button
+                                  onClick={() => handleReject(req.id)}
+                                  className="bg-white hover:bg-rose-600 text-rose-600 hover:text-white px-3 py-1.5 rounded-lg border border-rose-200 hover:border-rose-600 transition-all duration-150 text-xs font-medium flex items-center gap-1"
+                                >
+                                  {X && <X size={14} />} Reject Request
+                                </button>
+                              </>
+                            ) : (
+                              // 🔧 FIX: Admin tenant hanya boleh melihat status, tidak bisa approve/reject.
+                              <span className="text-xs text-amber-500 bg-amber-50 border border-amber-100 px-2.5 py-1 rounded-md font-medium italic">
+                                Menunggu tindakan Superadmin
+                              </span>
+                            )
                           )}
 
                           {isApproved && (
@@ -302,20 +362,28 @@ const GitHubIntegrations = () => {
                           )}
                           
                           {isConnected && (
-                            <>
-                              <button
-                                onClick={() => handleConfigureWebhook(req.project_id)}
-                                className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm text-xs font-semibold flex items-center gap-1.5"
-                              >
-                                {Webhook && <Webhook size={13} className="text-slate-300" />} Sync Webhook
-                              </button>
-                              <button
-                                onClick={() => handleDisconnect(req.id)}
-                                className="bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 px-3 py-1.5 rounded-lg border border-rose-200 transition-all duration-150 text-xs font-semibold flex items-center gap-1.5"
-                              >
-                                {Link2Off && <Link2Off size={13} />} Disconnect
-                              </button>
-                            </>
+                            isSuperadmin ? (
+                              <>
+                                <button
+                                  onClick={() => handleConfigureWebhook(req.project_id)}
+                                  className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition-all duration-150 shadow-sm text-xs font-semibold flex items-center gap-1.5"
+                                >
+                                  {Webhook && <Webhook size={13} className="text-slate-300" />} Sync Webhook
+                                </button>
+                                <button
+                                  onClick={() => handleDisconnect(req.id)}
+                                  className="bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 px-3 py-1.5 rounded-lg border border-rose-200 transition-all duration-150 text-xs font-semibold flex items-center gap-1.5"
+                                >
+                                  {Link2Off && <Link2Off size={13} />} Disconnect
+                                </button>
+                              </>
+                            ) : (
+                              // 🔧 FIX: Admin tenant cuma bisa lihat status koneksi, tidak bisa
+                              // sync webhook / disconnect -- itu wewenang Superadmin.
+                              <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-md font-medium italic">
+                                Dikelola oleh Superadmin
+                              </span>
+                            )
                           )}
                           
                           {isRejected && (

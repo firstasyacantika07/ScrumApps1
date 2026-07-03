@@ -6,7 +6,18 @@ const db = require('../config/db');
 exports.getMembers = async (req, res) => {
   try {
 
-    const { projectId } = req.params;
+    // 🛠️ FIX: sebelumnya hanya membaca req.params.projectId. Jika route
+    // didefinisikan dengan nama param ":id" (bukan ":projectId"), maka
+    // projectId akan undefined, query gagal, dan frontend menampilkan
+    // list kosong tanpa pesan error yang jelas. Sekarang menerima kedua
+    // kemungkinan nama param.
+    const projectId = req.params.projectId || req.params.id;
+
+    if (!projectId) {
+      return res.status(400).json({
+        message: 'Project ID tidak ditemukan pada request (periksa definisi route, gunakan :projectId atau :id).'
+      });
+    }
 
     const [rows] = await db.query(`
       SELECT 
@@ -49,12 +60,25 @@ exports.createMember = async (req, res) => {
 
   try {
 
-    const { projectId } = req.params;
+    // 🛠️ FIX: sama seperti getMembers, jaga-jaga nama param route berbeda
+    const projectId = req.params.projectId || req.params.id;
 
     const {
       user_id,
       role
     } = req.body;
+
+    if (!projectId) {
+      return res.status(400).json({
+        message: 'Project ID tidak ditemukan pada request (periksa definisi route, gunakan :projectId atau :id).'
+      });
+    }
+
+    if (!user_id || !role) {
+      return res.status(400).json({
+        message: 'user_id dan role wajib diisi'
+      });
+    }
 
     // CHECK DUPLICATE
     const [check] = await db.query(`

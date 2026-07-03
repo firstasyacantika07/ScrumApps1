@@ -91,29 +91,62 @@ exports.createProject = async (req, res) => {
 
         const [result] = await db.query(sql, values);
 
-        // 🔧 FIX UTAMA: Menyesuaikan dengan kolom role_in_project & menambahkan timestamp created_at
-        const projectRole = userRole === 'admin' ? 'ProjectOwner' : req.user.role;
+        // 🔧 FIX: Sebelumnya Product Owner TIDAK PERNAH bisa dipilih -- kode lama
+        // selalu memasukkan `userId` (Admin yang sedang login/pembuat proyek) ke
+        // `tbr_project_members` sebagai ProjectOwner, tanpa membaca pilihan PO dari
+        // form sama sekali. Akibatnya user yang seharusnya jadi PO (dipilih di
+        // frontend) tidak pernah tercatat sebagai member -> "bingung siapa PO-nya".
+        //
+        // Sekarang: frontend bisa mengirim `owner_id` (id user yang dipilih jadi
+        // Product Owner). Kalau tidak dikirim, fallback ke perilaku lama (Admin
+        // pembuat proyek otomatis jadi PO) supaya tetap kompatibel dengan client lama.
+        const requestedOwnerId = req.body.owner_id ? Number(req.body.owner_id) : null;
+        let ownerId = userId;
+
+        if (requestedOwnerId) {
+            // Validasi: user yang dipilih harus benar-benar ada dan berada di
+            // tenant/workspace yang sama, supaya Admin tidak bisa "mematenkan"
+            // orang dari tenant lain sebagai PO.
+            const [[candidateOwner]] = await db.query(
+                `SELECT id, name, email FROM tbr_users WHERE id = ? AND tenant_id = ?`,
+                [requestedOwnerId, tenantId]
+            );
+
+            if (!candidateOwner) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Bad Request: User yang dipilih sebagai Product Owner tidak ditemukan di workspace ini."
+                });
+            }
+
+            ownerId = candidateOwner.id;
+        }
+
+        // Product Owner (baik hasil pilihan Admin, maupun Admin itu sendiri sebagai
+        // fallback) SELALU dicatat dengan role_in_project = 'ProjectOwner' -- ini
+        // yang dipakai deleteProject() untuk menemukan siapa yang harus dinotifikasi.
         await db.query(
             `INSERT INTO tbr_project_members (project_id, user_id, role_in_project, created_at) VALUES (?, ?, ?, NOW())`,
-            [result.insertId, userId, projectRole]
+            [result.insertId, ownerId, 'ProjectOwner']
         );
 
         await createLog(userId, result.insertId, `Membuat proyek baru: "${req.body.name}"`);
 
-        // RF-13.1: notifikasi ke Product Owner saat ditambahkan ke proyek
-        if (userRole === 'admin') {
-            const [[ownerInfo]] = await db.query(`SELECT name, email FROM tbr_users WHERE id = ?`, [userId]);
-            if (ownerInfo?.email) {
-                await notificationService.sendProjectAssignmentNotification({
-                    userId,
-                    email: ownerInfo.email,
-                    userName: ownerInfo.name,
-                    projectName: req.body.name,
-                });
-            }
+        // RF-13.1: notifikasi ke Product Owner saat ditambahkan ke proyek.
+        // Dikirim ke `ownerId` (PO yang sebenarnya dipatenkan), bukan selalu ke
+        // Admin yang membuat proyek.
+        const [[ownerInfo]] = await db.query(`SELECT name, email FROM tbr_users WHERE id = ?`, [ownerId]);
+        if (ownerInfo?.email) {
+            await notificationService.sendProjectAssignmentNotification({
+                userId: ownerId,
+                email: ownerInfo.email,
+                userName: ownerInfo.name,
+                projectName: req.body.name,
+                projectId: result.insertId,
+            });
         }
 
-        return res.status(201).json({ success: true, message: "Proyek berhasil dibuat", id: result.insertId });
+        return res.status(201).json({ success: true, message: "Proyek berhasil dibuat", id: result.insertId, owner_id: ownerId });
     } catch (err) { 
         return res.status(500).json({ success: false, error: err.message }); 
     }
@@ -128,7 +161,9 @@ exports.getProjects = async (req, res) => {
         let sql;
         let params;
 
-        if (userRole === 'superadmin') {
+        if (userRole === 'superadmin' || userRole === 'admin') {
+            // Superadmin: lihat semua project di tenant manapun.
+            // Admin: lihat semua project di tenant/workspace-nya sendiri (bukan hanya yang dia buat/jadi member).
             sql = `
                 SELECT p.*, tnt.package_type as tenant_package_type 
                 FROM tbr_projects p 
@@ -167,7 +202,7 @@ exports.getProjectById = async (req, res) => {
         let sql;
         let params;
 
-        if (userRole === 'superadmin') {
+        if (userRole === 'superadmin' || userRole === 'admin') {
             sql = `
                 SELECT p.*, tnt.package_type as tenant_package_type 
                 FROM tbr_projects p 
@@ -251,13 +286,36 @@ exports.deleteProject = async (req, res) => {
             return res.status(404).json({ success: false, message: "Proyek tidak ditemukan." });
         }
 
-        // RF-13.2: Notifikasi ke semua Product Owner SEBELUM proyek benar-benar dihapus
-        const [owners] = await db.query(`
-            SELECT u.id, u.name, u.email 
-            FROM tbr_project_members pm
-            INNER JOIN tbr_users u ON pm.user_id = u.id
-            WHERE pm.project_id = ? AND pm.role_in_project = 'ProjectOwner'
-        `, [projectId]);
+        // 🔧 FIX: Query notifikasi DIPISAH dalam try/catch sendiri.
+        // Sebelumnya query ini satu try/catch besar dengan proses hapus project --
+        // kalau query ini gagal (mis. kolom salah/tabel beda), seluruh permintaan
+        // hapus project ikut gagal (500) padahal harusnya notifikasi gagal TIDAK
+        // boleh menghalangi project tetap terhapus.
+        //
+        // 🔧 FIX: Matching role_in_project dibuat case-insensitive & trim
+        // (LOWER(TRIM(...))) -- kalau di database tersimpan varian seperti
+        // "projectowner", "Project Owner", atau ada spasi tak sengaja, query lama
+        // akan gagal MENEMUKAN owner yang seharusnya, sehingga owner asli tidak
+        // dapat notifikasi.
+        let owners = [];
+        try {
+            [owners] = await db.query(`
+                SELECT u.id, u.name, u.email 
+                FROM tbr_project_members pm
+                INNER JOIN tbr_users u ON pm.user_id = u.id
+                WHERE pm.project_id = ? AND LOWER(TRIM(pm.role_in_project)) = 'projectowner'
+            `, [projectId]);
+
+            // 🔧 FIX: log eksplisit siapa yang terdeteksi sebagai ProjectOwner untuk
+            // project ini, supaya kalau ada laporan "email salah kirim ke X" bisa
+            // langsung dicek dari log apakah X memang tercatat sebagai ProjectOwner
+            // di tbr_project_members, atau ada bug lain.
+            console.log(`[DELETE PROJECT] Project #${projectId} ("${projectInfo[0].name}") -> ProjectOwner terdeteksi:`,
+                owners.map(o => `${o.name} <${o.email}>`));
+        } catch (notifQueryErr) {
+            console.error(`[DELETE PROJECT] Gagal mengambil daftar ProjectOwner untuk notifikasi (project #${projectId}):`, notifQueryErr.message);
+            // owners tetap [] -- proses hapus project TETAP lanjut di bawah.
+        }
 
         for (const owner of owners) {
             if (owner.email) {

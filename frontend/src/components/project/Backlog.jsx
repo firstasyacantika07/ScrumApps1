@@ -25,9 +25,14 @@ const Backlog = ({ projectId, currentRole }) => {
   const [formData, setFormData] = useState(initialFormState);
 
   const normalizedRole = currentRole?.toUpperCase() || '';
-  const isSuperAdmin = normalizedRole === 'SUPERADMIN';
-  const isBA = normalizedRole === 'BUSINESSANALYST';
-  const hasWriteAccess = (isSuperAdmin || isBA) && isSubscriptionActive;
+  // 🛠️ FIX: sebelumnya hanya SUPERADMIN & BUSINESSANALYST yang dianggap punya
+  // akses tulis, padahal backend (projectRoutes.js) mengizinkan
+  // authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst'])
+  // untuk create/update/delete backlog. Disamakan supaya tombol Add/Edit/Delete
+  // tidak hilang untuk role Admin & ProjectOwner.
+  const hasWriteAccess = 
+    ['SUPERADMIN', 'ADMIN', 'PROJECTOWNER', 'BUSINESSANALYST'].includes(normalizedRole) 
+    && isSubscriptionActive;
 
   const fetchBacklogs = useCallback(async () => {
     try {

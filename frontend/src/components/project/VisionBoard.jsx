@@ -20,9 +20,17 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
     competitors: ''
   });
 
-  const isSuperAdmin = currentRole === 'SUPERADMIN';
-  const isBA = currentRole === 'BUSINESSANALYST';
-  const hasWriteAccess = isSuperAdmin || isBA;
+  // 🛠️ FIX: sebelumnya hanya SUPERADMIN & BUSINESSANALYST — padahal backend
+  // (projectRoutes.js) mengizinkan authorize(['superadmin', 'admin',
+  // 'projectowner', 'businessanalyst']) untuk create/update vision board.
+  // Dibuat case-insensitive juga.
+  const normalizedRole = currentRole?.toString().toUpperCase() || '';
+  const hasWriteAccess = ['SUPERADMIN', 'ADMIN', 'PROJECTOWNER', 'BUSINESSANALYST'].includes(normalizedRole);
+  // 🛠️ FIX: backend KHUSUS untuk delete vision board TIDAK mengizinkan
+  // businessanalyst — authorize(['superadmin', 'admin', 'projectowner']).
+  // Tombol Delete dipisah aksesnya dari Add/Edit supaya BA tidak melihat
+  // tombol yang ujung-ujungnya ditolak backend (403).
+  const hasDeleteAccess = ['SUPERADMIN', 'ADMIN', 'PROJECTOWNER'].includes(normalizedRole);
 
   const fetchVisions = useCallback(async () => {
     if (!projectId) return;
@@ -82,7 +90,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
   };
 
   const handleDelete = async (id) => {
-    if (!hasWriteAccess) {
+    if (!hasDeleteAccess) {
       alert("Akses ditolak: Anda tidak memiliki otoritas untuk menghapus data.");
       return;
     }
@@ -140,14 +148,18 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
               <div className="bg-slate-50/70 px-8 py-4 flex justify-between items-center border-b border-slate-100">
                 <h3 className="font-black text-slate-700 uppercase tracking-tighter text-lg">{item.name}</h3>
                 
-                {hasWriteAccess && (
+                {(hasWriteAccess || hasDeleteAccess) && (
                   <div className="flex gap-2">
-                    <button onClick={() => handleEditClick(item)} className="p-2 bg-white rounded-xl text-blue-500 shadow-sm hover:bg-blue-50 transition-colors" title="Edit Board">
-                      <Edit size={16} />
-                    </button>
-                    <button onClick={() => handleDelete(item.id)} className="p-2 bg-white rounded-xl text-red-500 shadow-sm hover:bg-red-50 transition-colors" title="Delete Board">
-                      <Trash2 size={16} />
-                    </button>
+                    {hasWriteAccess && (
+                      <button onClick={() => handleEditClick(item)} className="p-2 bg-white rounded-xl text-blue-500 shadow-sm hover:bg-blue-50 transition-colors" title="Edit Board">
+                        <Edit size={16} />
+                      </button>
+                    )}
+                    {hasDeleteAccess && (
+                      <button onClick={() => handleDelete(item.id)} className="p-2 bg-white rounded-xl text-red-500 shadow-sm hover:bg-red-50 transition-colors" title="Delete Board">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

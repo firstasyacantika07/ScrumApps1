@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const db = require("../config/db");
 
 // Helper internal sanitasi format tanggal ISO
@@ -28,9 +29,6 @@ exports.login = async (req, res) => {
     // 🔧 FIX: Normalisasi email (trim + lowercase) supaya konsisten dengan data yang disimpan
     email = email ? email.trim().toLowerCase() : email;
 
-    // 🔍 DEBUG SEMENTARA: hapus setelah masalah login selesai
-    console.log("[LOGIN DEBUG] Mencoba login dengan email:", JSON.stringify(email));
-
     // 1. 🔥 REVISI: Ambil data profile dari tbr_users dan gabungkan data paket dari tbr_tenants
     const [rows] = await db.query(
       `
@@ -58,16 +56,11 @@ exports.login = async (req, res) => {
     const user = rows[0];
 
     if (!user) {
-      // 🔍 DEBUG SEMENTARA
-      console.log("[LOGIN DEBUG] User TIDAK DITEMUKAN untuk email:", JSON.stringify(email));
       return res.status(401).json({
         success: false,
         message: "Email atau password salah",
       });
     }
-
-    // 🔍 DEBUG SEMENTARA
-    console.log("[LOGIN DEBUG] User ditemukan, id:", user.id, "| hash di-DB (10 char awal):", user.password?.substring(0, 10));
 
     // 2. Sinkronisasi format hash bcrypt PHP ($2y$ ke $2a$)
     let hashedPassword = user.password;
@@ -77,9 +70,6 @@ exports.login = async (req, res) => {
 
     // 3. Verifikasi Password
     const isMatch = await bcrypt.compare(password, hashedPassword);
-
-    // 🔍 DEBUG SEMENTARA
-    console.log("[LOGIN DEBUG] Hasil bcrypt.compare:", isMatch);
 
     if (!isMatch) {
       return res.status(401).json({
@@ -277,9 +267,12 @@ exports.getMe = async (req, res) => {
 // 📝 USER REGISTER (Self Sign-Up: buat Tenant baru + User Admin pertama)
 // ======================================================
 exports.register = async (req, res) => {
-  const connection = await db.getConnection(); // pastikan db (mysql2 pool) support getConnection()
+  // 🔧 FIX: getConnection() dipindah ke dalam try — sebelumnya di luar try,
+  // sehingga jika pool koneksi habis/reject, error tidak tertangkap (unhandled rejection).
+  let connection;
   try {
-    const { name, email, password, company_name } = req.body;
+    connection = await db.getConnection();
+    const { name, email, password, company_name, phone_number } = req.body; // 🔧 FIX: tangkap phone_number
 
     // 1. Validasi input dasar (Kini menyertakan company_name)
     if (!name || !email || !password || !company_name) {
@@ -349,10 +342,11 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 5. Buat user pertama sebagai admin/owner tenant tersebut
+    // 🔧 FIX: Sertakan phone_number agar tersimpan (sebelumnya diabaikan meski dikirim frontend)
     const [userResult] = await connection.query(
-      `INSERT INTO tbr_users (name, email, password, role, tenant_id)
-       VALUES (?, ?, ?, 'admin', ?)`,
-      [email.trim().toLowerCase(), name, hashedPassword, tenantId]
+      `INSERT INTO tbr_users (name, email, password, role, tenant_id, phone_number)
+       VALUES (?, ?, ?, 'admin', ?, ?)`,
+      [email.trim().toLowerCase(), name, hashedPassword, tenantId, phone_number || null]
     );
 
     await connection.commit();
@@ -394,11 +388,14 @@ exports.register = async (req, res) => {
     });
 
   } catch (error) {
-    try {
-      await connection.rollback();
-      connection.release();
-    } catch (e) {
-      // koneksi mungkin sudah ter-release, abaikan
+    // 🔧 FIX: guard `connection &&` — bisa saja error terjadi sebelum getConnection() berhasil
+    if (connection) {
+      try {
+        await connection.rollback();
+        connection.release();
+      } catch (e) {
+        // koneksi mungkin sudah ter-release, abaikan
+      }
     }
     console.error("REGISTER ERROR:", error);
     return res.status(500).json({
@@ -410,23 +407,132 @@ exports.register = async (req, res) => {
 };
 
 // ======================================================
-// 🔍 DEBUG SEMENTARA: List semua user (hapus setelah masalah selesai!)
+// 🔑 FORGOT PASSWORD (Kirim tautan atur ulang kata sandi)
 // ======================================================
-exports.debugListUsers = async (req, res) => {
+exports.forgotPassword = async (req, res) => {
   try {
+    let { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email wajib diisi",
+      });
+    }
+
+    email = email.trim().toLowerCase();
+
     const [rows] = await db.query(
-      `SELECT id, name, email, role, tenant_id, LENGTH(email) as email_length FROM tbr_users ORDER BY id DESC LIMIT 50`
+      `SELECT id, name FROM tbr_users WHERE email = ? LIMIT 1`,
+      [email]
     );
+    const user = rows[0];
+
+    // 🔒 Pesan generik dikembalikan baik email ditemukan maupun tidak,
+    // supaya endpoint ini tidak bisa dipakai untuk menebak email yang terdaftar.
+    const genericResponse = {
+      success: true,
+      message: "Jika email terdaftar, tautan atur ulang kata sandi telah dikirim.",
+    };
+
+    if (!user) {
+      return res.status(200).json(genericResponse);
+    }
+
+    // Generate token acak, simpan versi hash-nya saja di DB (token asli hanya ada di link email)
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // berlaku 1 jam
+
+    await db.query(
+      `UPDATE tbr_users SET reset_token = ?, reset_token_expires = ? WHERE id = ?`,
+      [hashedToken, expiresAt.toISOString().slice(0, 19).replace("T", " "), user.id]
+    );
+
+    const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
+
+    // 🔧 TODO: Sambungkan ke layanan email sungguhan (SMTP/SendGrid/Resend/dll).
+    // Untuk sementara, tautan reset di-log ke console server agar development tetap jalan.
+    console.log(`[FORGOT PASSWORD] Tautan reset untuk ${email}: ${resetUrl}`);
+
+    return res.status(200).json(genericResponse);
+
+  } catch (error) {
+    console.error("FORGOT PASSWORD ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Gagal memproses permintaan lupa password",
+    });
+  }
+};
+
+// ======================================================
+// 🔑 RESET PASSWORD (Set kata sandi baru menggunakan token dari email)
+// ======================================================
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, token, newPassword } = req.body;
+
+    if (!email || !token || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Email, token, dan password baru wajib diisi",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password minimal 6 karakter",
+      });
+    }
+
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    const [rows] = await db.query(
+      `SELECT id, reset_token_expires FROM tbr_users WHERE email = ? AND reset_token = ? LIMIT 1`,
+      [email.trim().toLowerCase(), hashedToken]
+    );
+    const user = rows[0];
+
+    if (!user || !user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "Tautan reset tidak valid atau sudah kedaluwarsa",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await db.query(
+      `UPDATE tbr_users SET password = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?`,
+      [hashedPassword, user.id]
+    );
+
     return res.status(200).json({
       success: true,
-      count: rows.length,
-      users: rows.map(u => ({
-        ...u,
-        email_json: JSON.stringify(u.email),
-      })),
+      message: "Password berhasil diatur ulang, silakan login dengan password baru Anda",
     });
+
   } catch (error) {
-    console.error("DEBUG LIST USERS ERROR:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("RESET PASSWORD ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Gagal mengatur ulang password",
+    });
   }
+};
+
+// ======================================================
+// 🔧 FIX: Endpoint debug ini sebelumnya expose seluruh daftar user (id, email, role,
+// tenant_id) TANPA pengecekan auth di dalam controller — risiko kebocoran data lintas
+// tenant kalau route-nya tidak diproteksi middleware. Dinonaktifkan di sini.
+// Kalau memang masih dibutuhkan untuk debugging, aktifkan lagi HANYA di belakang
+// middleware auth + role admin, dan jangan biarkan aktif di production.
+// ======================================================
+exports.debugListUsers = async (req, res) => {
+  return res.status(410).json({
+    success: false,
+    message: "Endpoint debug ini sudah dinonaktifkan.",
+  });
 };

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus,
   Trash2,
@@ -15,7 +16,8 @@ import {
 import api from '../../api/axios';
 import Modal from '../ui/Modal';
 
-const Members = ({ projectId }) => {
+const Members = ({ projectId, currentRole, currentUserId }) => {
+  const navigate = useNavigate();
   const [members, setMembers] = useState([]);
   const [users, setUsers] = useState([]);
 
@@ -28,7 +30,20 @@ const Members = ({ projectId }) => {
 
   const [selectedMember, setSelectedMember] = useState(null);
 
-  const currentUser = JSON.parse(localStorage.getItem('user')) || {};
+  // 🛠️ FIX: sebelumnya SEMUA data currentUser (role & id) diambil langsung
+  // dari localStorage secara terpisah, padahal ProjectDetail.jsx sudah
+  // mengirim currentRole & currentUserId lewat prop (hasil fetch fresh dari
+  // /auth/me — sama seperti yang dipakai Backlog.jsx, Sprint.jsx, dll).
+  // Kalau localStorage basi/kosong/beda struktur, role bisa jatuh ke default
+  // 'GUEST' walau sebenarnya sedang login sebagai Admin, sehingga tombol
+  // Add/Edit/Delete hilang. Sekarang prop diprioritaskan, localStorage hanya
+  // fallback kalau prop tidak dikirim (jaga-jaga dipakai di tempat lain tanpa
+  // prop ini).
+  const localUser = JSON.parse(localStorage.getItem('user')) || {};
+  const currentUser = {
+    id: currentUserId ?? localUser.id,
+    role: currentRole ?? localUser.role
+  };
 
   const [formData, setFormData] = useState({
     user_id: '',
@@ -38,9 +53,12 @@ const Members = ({ projectId }) => {
   /* =====================================================
       FETCH DATA
    ===================================================== */
+  const [fetchError, setFetchError] = useState(''); // 🛠️ FIX: state error khusus fetch list, sebelumnya tidak ada sehingga error 500/network diam-diam jadi "list kosong"
+
   const fetchMembers = async () => {
     try {
       setLoading(true);
+      setFetchError('');
       const res = await api.get(`/projects/${projectId}/members`);
       
       // Amankan jika API membungkus data di dalam objek `.data` atau langsung Array
@@ -49,6 +67,11 @@ const Members = ({ projectId }) => {
     } catch (err) {
       console.error('GET MEMBERS ERROR:', err.response?.data || err.message);
       setMembers([]); // Fallback ke array kosong jika error
+      // 🛠️ FIX: tampilkan pesan error ke user, bukan cuma console.error,
+      // supaya "list kosong karena error" tidak disalahartikan sebagai "memang belum ada member"
+      setFetchError(
+        err.response?.data?.message || 'Gagal memuat daftar member. Periksa koneksi atau coba lagi.'
+      );
     } finally {
       setLoading(false);
     }
@@ -138,9 +161,19 @@ const Members = ({ projectId }) => {
 
   const handleDeleteMember = async () => {
     try {
+      const wasSelf = selectedMember?.user_id === currentUser.id;
       await api.delete(`/projects/${projectId}/members/${selectedMember.id}`);
       setIsDeleteModalOpen(false);
       resetForm();
+      // 🛠️ FIX: kalau user menghapus dirinya sendiri dari project, dia sudah
+      // tidak punya akses lagi ke project ini — fetchMembers() akan gagal
+      // (403) karena backend memvalidasi keanggotaan/tenant. Alihkan balik
+      // ke daftar project alih-alih coba fetch ulang halaman yang sudah
+      // tidak bisa diaksesnya.
+      if (wasSelf) {
+        navigate('/projects');
+        return;
+      }
       fetchMembers();
     } catch (err) {
       console.error('DELETE MEMBER ERROR:', err.response?.data || err.message);
@@ -184,7 +217,14 @@ const Members = ({ projectId }) => {
     }
   };
 
-  const canManageMember = currentUser?.role === 'Superadmin' || currentUser?.role === 'ProjectOwner';
+  // 🛠️ FIX: sebelumnya hanya role 'Superadmin' (persis, case-sensitive) yang
+  // bisa mengelola member, sehingga tombol Add/Edit/Delete tidak pernah muncul
+  // untuk user dengan role 'Admin' — padahal backend (projectRoutes.js)
+  // sudah mengizinkan authorize(['superadmin', 'admin']) untuk endpoint ini.
+  // Disamakan dengan backend + dibuat case-insensitive supaya tidak rapuh
+  // terhadap variasi penulisan role ('Admin', 'admin', 'ADMIN', dst).
+  const currentRoleLower = currentUser?.role?.toString().toLowerCase() || '';
+  const canManageMember = ['superadmin', 'admin'].includes(currentRoleLower);
 
   return (
     <div className="space-y-6">
@@ -217,6 +257,20 @@ const Members = ({ projectId }) => {
       {/* MEMBER LIST */}
       {loading ? (
         <div className="text-center py-20 text-gray-400">Loading members...</div>
+      ) : fetchError ? (
+        // 🛠️ FIX: state error eksplisit, sebelumnya error fetch tidak pernah ditampilkan ke user
+        <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+          <AlertCircle size={28} className="text-red-400" />
+          <p className="text-sm font-semibold text-red-500">{fetchError}</p>
+          <button
+            onClick={fetchMembers}
+            className="mt-2 bg-gray-100 hover:bg-gray-200 text-gray-600 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wide transition-colors"
+          >
+            Coba Lagi
+          </button>
+        </div>
+      ) : members.length === 0 ? (
+        <div className="text-center py-20 text-gray-400 text-sm">Belum ada member di project ini.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {members.map((member) => {
@@ -243,19 +297,27 @@ const Members = ({ projectId }) => {
                     </div>
                   </div>
 
-                  {/* Tombol manajemen aksi hanya tampil jika memiliki izin akses DAN kartu bukan milik diri sendiri */}
-                  {canManageMember && !isSelf && (
+                  {/* 🛠️ FIX: sebelumnya tombol Edit & Delete SAMA-SAMA disembunyikan
+                      untuk kartu diri sendiri (isSelf). Sekarang dipecah:
+                      - Edit role diri sendiri tetap disembunyikan (mencegah user
+                        tidak sengaja mengubah/menaikkan role-nya sendiri).
+                      - Delete (keluar dari project) tetap boleh dilakukan
+                        terhadap diri sendiri, sesuai permintaan. */}
+                  {canManageMember && (
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => openEditModal(member)}
-                        className="p-2 rounded-xl bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors"
-                      >
-                        <Edit size={16} />
-                      </button>
+                      {!isSelf && (
+                        <button
+                          onClick={() => openEditModal(member)}
+                          className="p-2 rounded-xl bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors"
+                        >
+                          <Edit size={16} />
+                        </button>
+                      )}
 
                       <button
                         onClick={() => openDeleteModal(member)}
                         className="p-2 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
+                        title={isSelf ? 'Keluar dari project ini' : 'Hapus member'}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -366,10 +428,14 @@ const Members = ({ projectId }) => {
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => { setIsDeleteModalOpen(false); resetForm(); }}
-        title="Delete Member"
+        title={selectedMember?.user_id === currentUser.id ? "Keluar dari Project" : "Delete Member"}
       >
         <div className="space-y-5">
-          <p className="text-gray-600">Yakin ingin menghapus member dari project ini?</p>
+          <p className="text-gray-600">
+            {selectedMember?.user_id === currentUser.id
+              ? 'Anda akan keluar dari project ini dan kehilangan akses ke seluruh datanya. Yakin ingin melanjutkan?'
+              : 'Yakin ingin menghapus member dari project ini?'}
+          </p>
           <div className="bg-gray-100 p-4 rounded-2xl">
             <h3 className="font-bold">{selectedMember?.name}</h3>
             <p className="text-sm text-gray-500">{selectedMember?.email}</p>

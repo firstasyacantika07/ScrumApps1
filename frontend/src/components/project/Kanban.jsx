@@ -31,8 +31,13 @@ const Kanban = ({ projectId, currentRole }) => {
   });
 
   const normalizedRole = currentRole?.toUpperCase() || '';
+  // 🛠️ FIX: 'ADMIN' sebelumnya tidak ada di daftar ini, padahal backend
+  // (projectRoutes.js) mengizinkan authorize(['superadmin', 'admin',
+  // 'projectowner', 'businessanalyst', 'teamdeveloper']) untuk
+  // create/update/delete development (kanban).
   const hasWriteAccess = 
     normalizedRole === 'SUPERADMIN' || 
+    normalizedRole === 'ADMIN' ||
     normalizedRole === 'PROJECTOWNER' || 
     normalizedRole === 'BUSINESSANALYST' || 
     normalizedRole === 'DEVELOPER' || 

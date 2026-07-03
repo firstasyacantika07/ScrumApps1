@@ -56,6 +56,36 @@ router.post("/register", (req, res, next) => {
 });
 
 /**
+ * @route   POST /api/auth/forgot-password
+ * @desc    Kirim tautan atur ulang kata sandi ke email user (jika terdaftar)
+ * @access  Public
+ */
+router.post("/forgot-password", (req, res, next) => {
+  if (!authController?.forgotPassword) {
+    return res.status(500).json({
+      success: false,
+      message: "Fungsi authController.forgotPassword tidak ditemukan atau gagal diekspor",
+    });
+  }
+  return authController.forgotPassword(req, res, next);
+});
+
+/**
+ * @route   POST /api/auth/reset-password
+ * @desc    Atur ulang kata sandi menggunakan token dari email
+ * @access  Public
+ */
+router.post("/reset-password", (req, res, next) => {
+  if (!authController?.resetPassword) {
+    return res.status(500).json({
+      success: false,
+      message: "Fungsi authController.resetPassword tidak ditemukan atau gagal diekspor",
+    });
+  }
+  return authController.resetPassword(req, res, next);
+});
+
+/**
  * 🔍 DEBUG SEMENTARA — hapus route ini setelah masalah login selesai!
  * @route   GET /api/auth/debug-users
  */

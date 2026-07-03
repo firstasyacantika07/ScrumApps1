@@ -10,8 +10,24 @@ const notificationService = require('../services/notificationService');
  * lama tersebut (atau hentikan require-nya di app.js/server.js) setelah memakai file ini.
  */
 
-const runSprintReminderJob = async () => {
+const runSprintReminderJob = async (targetUserId = null) => {
+  let sentCount = 0;
+
   try {
+    // 🔧 FIX: RF-14.1 mensyaratkan "tenggat sprint KURANG DARI tiga hari".
+    // Kondisi lama "<= 3" ikut mengirim reminder saat sisa waktu TEPAT 3 hari,
+    // padahal itu bukan "kurang dari tiga hari". Diperbaiki menjadi "< 3".
+    //
+    // 🆕 targetUserId (opsional): kalau diisi, hanya sprint milik PO tersebut
+    // yang diproses -- dipakai untuk fitur "Kirim Reminder Manual" di dashboard
+    // Team Developer (kirim reminder ke satu PO tertentu, bukan job massal).
+    const params = [];
+    let userFilter = '';
+    if (targetUserId) {
+      userFilter = 'AND u.id = ?';
+      params.push(targetUserId);
+    }
+
     const [sprints] = await db.query(`
       SELECT
         s.name as sprint_name,
@@ -26,14 +42,15 @@ const runSprintReminderJob = async () => {
       JOIN tbr_project_members pm ON p.id = pm.project_id
       JOIN tbr_users u ON pm.user_id = u.id
       WHERE pm.role_in_project = 'ProjectOwner'
-      AND DATEDIFF(s.end_date, NOW()) <= 3
+      AND DATEDIFF(s.end_date, NOW()) < 3
       AND DATEDIFF(s.end_date, NOW()) >= 0
-    `);
+      ${userFilter}
+    `, params);
 
     for (const item of sprints) {
       const daysLeft = notificationService.getDaysLeft(item.end_date);
 
-      await notificationService.sendSprintReminderNotification({
+      const result = await notificationService.sendSprintReminderNotification({
         userId: item.user_id,
         projectId: item.project_id,
         email: item.email,
@@ -42,15 +59,27 @@ const runSprintReminderJob = async () => {
         sprintName: item.sprint_name,
         daysLeft
       });
+
+      // 🔧 FIX: fungsi ini sebelumnya tidak melacak/mengembalikan apa pun,
+      // padahal notificationRoutes.js (trigger-sprint-check) mengharapkan
+      // nilai `count` untuk ditampilkan ke Business Analyst/Admin.
+      if (result?.emailSent || result?.notifId) {
+        sentCount += 1;
+      }
     }
   } catch (err) {
     console.error('[Sprint Reminder Cron Error]:', err.message);
   }
+
+  return sentCount;
 };
 
 const startCronJobs = () => {
-  // Setiap hari jam 08:00
-  cron.schedule('0 8 * * *', runSprintReminderJob);
+  // 🔧 FIX: tanpa `timezone` eksplisit, jadwal ini mengikuti timezone SERVER
+  // (kalau di-deploy di VPS/cloud yang di-set UTC, "jam 08:00" di sini
+  // sebenarnya jam 15:00 WIB, bukan jam 8 pagi seperti yang dimaksud).
+  // Dikunci ke Asia/Jakarta supaya konsisten di server manapun ia di-deploy.
+  cron.schedule('0 8 * * *', runSprintReminderJob, { timezone: 'Asia/Jakarta' });
 };
 
 module.exports = { startCronJobs, runSprintReminderJob };

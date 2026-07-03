@@ -1,9 +1,14 @@
+// 🟢 DEBUG SEMENTARA: konfirmasi file ini benar-benar ter-load oleh Node.
+// Hapus baris ini setelah masalah 404 selesai didiagnosis.
+console.log('🟢 billingRoutes.js FILE TER-LOAD, waktu:', new Date().toISOString());
+
 const express = require('express');
 const router = express.Router();
 const db = require("../config/db");
 
 // Import Controller
 const paymentController = require('../controllers/paymentController');
+const billingController = require('../controllers/billingController');
 
 // Middleware auth
 const { verifyToken, authorize } = require('../middleware/auth');
@@ -13,6 +18,11 @@ const { verifyToken, authorize } = require('../middleware/auth');
    ========================================================================= */
 // Dipanggil server-to-server oleh Midtrans tanpa menggunakan token Bearer/JWT
 router.post('/webhook', paymentController.handleMidtransWebhook);
+
+// 🟢 DEBUG SEMENTARA: cek apakah router ini bisa dijangkau sama sekali.
+// Test di browser: http://localhost:5000/api/billing/ping
+// Hapus route ini setelah masalah 404 selesai didiagnosis.
+router.get('/ping', (req, res) => res.json({ ok: true, message: 'billingRoutes reachable' }));
 
 
 /* =========================================================================
@@ -28,95 +38,24 @@ router.use(verifyToken);
 /**
  * 📊 GET: Mengambil status billing tenant saat ini & sisa kuota utilisasi
  * Endpoint: GET /api/billing/status (atau sesuai mounting di server.js Anda)
+ *
+ * 🔧 FIX (root cause data "tidak sinkron"): route ini sebelumnya punya logika
+ * INLINE duplikat yang terpisah dari billingController.js, dengan bentuk
+ * response berbeda (nested di bawah `data.constraints.*`) dan angka limit
+ * paket yang berbeda pula dari billingController.js. billingController.js
+ * sendiri TIDAK PERNAH ter-require di file ini, jadi versinya yang benar
+ * (flat: `data.project_limit`, `data.team_limit`) tidak pernah benar-benar
+ * jalan — yang jalan adalah versi inline ini, yang bentuk responsenya tidak
+ * cocok dengan yang dibaca frontend. Itu sebabnya dashboard admin selalu
+ * menampilkan "0/∞" walau query database-nya sendiri sukses.
+ * Sekarang didelegasikan ke satu sumber kebenaran: billingController.js.
+ *
+ * ⚠️ CATATAN: fix ini sempat ter-revert sekali (file lama ter-upload ulang).
+ * Pastikan file hasil terbaru ini yang benar-benar dipakai di server produksi/
+ * development Anda -- cek ulang dengan `git diff` atau bandingkan isi file
+ * setelah deploy, supaya tidak ter-overwrite balik ke versi lama lagi.
  */
-router.get("/status", async (req, res) => {
-    try {
-        const tenantId = req.user?.tenant_id;
-
-        if (!tenantId) {
-            return res.status(400).json({
-                success: false,
-                message: "Tenant ID tidak ditemukan pada sesi token Anda."
-            });
-        }
-
-        // Query fresh ke tbr_tenants agar data bersifat real-time untuk semua admin/superadmin
-        const [tenantRows] = await db.query(
-            `SELECT id, company_name, package_type, billing_cycle, subscription_status,
-                    trial_end, subscription_ends_at
-             FROM tbr_tenants WHERE id = ?`, 
-            [tenantId]
-        );
-
-        if (tenantRows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Data workspace / organisasi tidak ditemukan."
-            });
-        }
-
-        const tenant = tenantRows[0];
-
-        const packageType = (tenant.package_type || 'FREE').toUpperCase();
-        const billingCycle = tenant.billing_cycle || 'NONE';
-        const trialEnd = tenant.trial_end;
-        const subscriptionEndsAt = tenant.subscription_ends_at;
-
-        // Hitung sisa masa aktif paket
-        let remainingDays = 0;
-        const referenceEndDate = billingCycle === 'TRIAL' ? trialEnd : subscriptionEndsAt;
-        if (referenceEndDate) {
-            const diffMs = new Date(referenceEndDate).getTime() - Date.now();
-            remainingDays = diffMs > 0 ? Math.ceil(diffMs / (1000 * 60 * 60 * 24)) : 0;
-        }
-
-        // Hitung akumulasi project yang telah dibuat oleh tenant ini
-        const [projectRows] = await db.query(
-            'SELECT COUNT(*) as total FROM tbr_projects WHERE tenant_id = ?',
-            [tenantId]
-        );
-        const projectUsed = projectRows[0]?.total || 0;
-
-        // Hitung akumulasi anggota tim (users) yang bergabung di tenant ini
-        const [teamRows] = await db.query(
-            'SELECT COUNT(*) as total FROM tbr_users WHERE tenant_id = ?',
-            [tenantId]
-        );
-        const teamUsed = teamRows[0]?.total || 0;
-
-        // Definisi limitasi kuota langganan SaaS
-        const PACKAGE_LIMITS = {
-            FREE: { project: 1, team: 5 },
-            PRO: { project: 15, team: 25 },
-            ENTERPRISE: { project: 999, team: 999 }
-        };
-        const limits = PACKAGE_LIMITS[packageType] || PACKAGE_LIMITS.FREE;
-
-        return res.status(200).json({
-            success: true,
-            data: {
-                tenant_id: tenant.id,
-                company_name: tenant.company_name,
-                package_type: packageType,
-                billing_cycle: billingCycle,
-                remaining_days: remainingDays,
-                constraints: {
-                    project_used: projectUsed,
-                    project_limit: limits.project,
-                    team_used: teamUsed,
-                    team_limit: limits.team
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error("GET WORKSPACE BILLING STATUS ERROR:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Terjadi kesalahan internal server saat memuat status langganan."
-        });
-    }
-});
+router.get("/status", billingController.getBillingStatus);
 
 /**
  * 🎯 GET: Mengambil daftar penawaran paket langganan dari database

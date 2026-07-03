@@ -3,6 +3,11 @@ const router = express.Router();
 
 const { verifyToken, authorize } = require('../middleware/auth');
 // 🔥 IMPORT: Satpam pemblokir kuota data paket langganan
+// 🛠️ FIX (revisi ke-2): checkTeamLimit dikembalikan lagi ke sini. Setelah
+// dicek teamController.js, ternyata SISTEM INI (teamController + kolom
+// role_in_project + validasi tenant_id) adalah yang BENAR dan aktif dipakai
+// — bukan projectMemberController. Lihat catatan lengkap di blok route
+// '/:projectId/members' di bawah.
 const { checkProjectLimit, checkTeamLimit } = require('../middleware/SubscriptionsMiddleware');
 
 const projectController = require('../controllers/projectController');
@@ -89,6 +94,18 @@ router.post('/:projectId/github-link-action', githubController.linkGitActionToKa
 /* =====================================================
    👥 TEAM ROUTES & TEAM LIMITATION SECURITY
    ===================================================== */
+// 🛠️ FIX (revisi ke-2, membatalkan revisi sebelumnya): route ini DIKEMBALIKAN
+// setelah teamController.js dicek. Sistem member project yang BENAR dan aktif
+// adalah teamController, karena: (1) query/insert-nya konsisten memakai kolom
+// `role_in_project` sesuai skema tabel tbr_project_members yang sebenarnya —
+// projectMemberController (di projectMemberRoutes.js) memakai nama kolom
+// `role` yang salah dan akan gagal dengan SQL error; (2) teamController selalu
+// validasi project milik tenant_id user yang login (aman multi-tenant),
+// sedangkan projectMemberController TIDAK melakukan validasi tenant sama
+// sekali (celah keamanan IDOR — user tenant lain bisa akses member project
+// tenant lain hanya dengan menebak projectId).
+// projectMemberRoutes.js / projectMemberController.js sebaiknya TIDAK di-mount
+// lagi di app.js, atau dihapus, supaya tidak bentrok dengan route di bawah ini.
 router.get('/:projectId/members', teamController.getTeamByProject);
 router.post('/:projectId/members', authorize(['superadmin', 'admin']), checkTeamLimit, teamController.addTeamMember);
 router.put('/:projectId/members/:memberId', authorize(['superadmin', 'admin']), teamController.updateTeamMember);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, forwardRef, useImperativeHandle } from 'react'; // 🛠️ Tambahkan forwardRef & useImperativeHandle
 import { 
-  Search, Calendar, Trash2, Edit3, Plus, ClipboardCheck, History
+  Search, Calendar, Trash2, Edit3, Plus, ClipboardCheck, History, Bell, Loader2
 } from 'lucide-react';
 import api from '../../api/axios';
 import Modal from '../ui/Modal';
@@ -12,6 +12,8 @@ const Sprint = forwardRef(({ projectId, currentRole }, ref) => { // 🛠️ Bung
   const [searchTerm, setSearchTerm] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState(null);
+  const [sendingReminderId, setSendingReminderId] = useState(null); // 🔔 id sprint yg sedang dikirim reminder-nya
+  const [projectOwner, setProjectOwner] = useState(null); // 🔔 { userId, name } - PO proyek ini, dipakai target trigger-sprint-check
   
   const [formData, setFormData] = useState({
     name: '',
@@ -23,9 +25,13 @@ const Sprint = forwardRef(({ projectId, currentRole }, ref) => { // 🛠️ Bung
     result_retrospective: ''
   });
 
-  const isSuperAdmin = currentRole === 'SUPERADMIN';
-  const isBA = currentRole === 'BUSINESSANALYST';
-  const hasWriteAccess = isSuperAdmin || isBA;
+  // 🛠️ FIX: sebelumnya perbandingan `currentRole === 'SUPERADMIN'` case-sensitive
+  // dan hanya mengizinkan SUPERADMIN & BUSINESSANALYST — padahal backend
+  // (projectRoutes.js) mengizinkan authorize(['superadmin', 'admin',
+  // 'projectowner', 'businessanalyst']) untuk create/update/delete sprint.
+  // Disamakan + dibuat case-insensitive.
+  const normalizedRole = currentRole?.toString().toUpperCase() || '';
+  const hasWriteAccess = ['SUPERADMIN', 'ADMIN', 'PROJECTOWNER', 'BUSINESSANALYST'].includes(normalizedRole);
 
   // 🛠️ Ekspos fungsi ke Parent (ProjectDetail) agar bisa membuka modal tambah dari luar
   useImperativeHandle(ref, () => ({
@@ -40,7 +46,10 @@ const Sprint = forwardRef(({ projectId, currentRole }, ref) => { // 🛠️ Bung
   }));
 
   useEffect(() => {
-    if (projectId) fetchSprints();
+    if (projectId) {
+      fetchSprints();
+      fetchProjectOwner();
+    }
   }, [projectId]);
 
   const fetchSprints = async () => {
@@ -52,6 +61,33 @@ const Sprint = forwardRef(({ projectId, currentRole }, ref) => { // 🛠️ Bung
       console.error("Fetch Sprints Error:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 🔔 Ambil Product Owner proyek ini dari endpoint members yang sudah ada
+  // (teamController.getTeamByProject), supaya tombol reminder tahu harus
+  // menyasar user mana lewat POST /notifications/trigger-sprint-check.
+  // CATATAN: nama field di bawah (user_id/role_in_project) mengikuti skema
+  // tbr_project_members. Kalau shape response teamController ternyata beda,
+  // sesuaikan mapping di sini.
+  const fetchProjectOwner = async () => {
+    try {
+      const res = await api.get(`/projects/${projectId}/members`);
+      const members = res.data?.data || res.data || [];
+      const po = members.find(
+        (m) => String(m.role_in_project || m.role || '').toLowerCase() === 'projectowner'
+      );
+      if (po) {
+        setProjectOwner({
+          userId: po.user_id ?? po.userId ?? po.id,
+          name: po.name || po.user_name || 'Product Owner'
+        });
+      } else {
+        setProjectOwner(null);
+      }
+    } catch (err) {
+      console.error("Fetch Project Owner Error:", err);
+      setProjectOwner(null);
     }
   };
 
@@ -159,6 +195,52 @@ const Sprint = forwardRef(({ projectId, currentRole }, ref) => { // 🛠️ Bung
         console.error(err);
         alert("Gagal menghapus data sprint");
       }
+    }
+  };
+
+  // 🔔 Replikasi kondisi RF-14.1 di cronService.js (DATEDIFF < 3 AND >= 0)
+  // supaya tombol reminder di UI hanya aktif saat sprint memang memenuhi
+  // syarat backend — mencegah user bingung klik tombol tapi 0 notifikasi terkirim.
+  const getDaysLeftClient = (endDate) => {
+    if (!endDate) return null;
+    const end = new Date(endDate);
+    if (isNaN(end.getTime())) return null;
+    end.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((end - today) / (1000 * 60 * 60 * 24));
+  };
+
+  const isReminderEligible = (sprint) => {
+    const daysLeft = getDaysLeftClient(sprint.end_date);
+    return daysLeft !== null && daysLeft >= 0 && daysLeft < 3;
+  };
+
+  // 🔔 RF-14.1: kirim reminder ke Product Owner secara manual dari UI.
+  // Memanggil endpoint yang SUDAH ADA (notificationRoutes.js ->
+  // POST /notifications/trigger-sprint-check) dengan userId = PO proyek ini,
+  // BUKAN endpoint custom terpisah, supaya tidak duplikat dengan cronService.js.
+  const handleSendReminder = async (sprint) => {
+    if (!hasWriteAccess) {
+      alert("Akses Ditolak: Anda tidak memiliki otoritas mengirim reminder sprint.");
+      return;
+    }
+
+    if (!projectOwner?.userId) {
+      alert("Product Owner untuk proyek ini belum ditemukan/terdaftar sebagai member.");
+      return;
+    }
+
+    if (!window.confirm(`Kirim reminder ke Product Owner (${projectOwner.name}) untuk sprint yang mendekati tenggat?`)) return;
+
+    try {
+      setSendingReminderId(sprint.id);
+      const res = await api.post(`/notifications/trigger-sprint-check`, { userId: projectOwner.userId });
+      alert(res.data?.message || "Reminder berhasil diproses.");
+    } catch (err) {
+      alert(err.response?.data?.message || "Gagal mengirim reminder ke Product Owner.");
+    } finally {
+      setSendingReminderId(null);
     }
   };
 
@@ -278,6 +360,20 @@ const Sprint = forwardRef(({ projectId, currentRole }, ref) => { // 🛠️ Bung
                     {hasWriteAccess && (
                       <td className="px-8 py-5">
                         <div className="flex justify-center gap-1">
+                          <button
+                            onClick={() => handleSendReminder(sprint)}
+                            disabled={sendingReminderId === sprint.id || !isReminderEligible(sprint) || !projectOwner}
+                            className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50/50 rounded-xl transition disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                            title={
+                              !projectOwner
+                                ? "Product Owner proyek ini belum ditemukan"
+                                : !isReminderEligible(sprint)
+                                  ? "Reminder hanya aktif saat sisa waktu sprint kurang dari 3 hari"
+                                  : `Kirim Reminder ke ${projectOwner.name}`
+                            }
+                          >
+                            {sendingReminderId === sprint.id ? <Loader2 size={14} className="animate-spin"/> : <Bell size={14}/>}
+                          </button>
                           <button onClick={() => handleEditClick(sprint)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50/50 rounded-xl transition" title="Edit Sprint">
                             <Edit3 size={14}/>
                           </button>
