@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const db = require("../config/db");
+const { sendEmail } = require("../services/emailService");
 
 // Helper internal sanitasi format tanggal ISO
 const safeIsoDate = (dateString) => {
@@ -451,9 +452,31 @@ exports.forgotPassword = async (req, res) => {
 
     const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/reset-password?token=${rawToken}&email=${encodeURIComponent(email)}`;
 
-    // 🔧 TODO: Sambungkan ke layanan email sungguhan (SMTP/SendGrid/Resend/dll).
-    // Untuk sementara, tautan reset di-log ke console server agar development tetap jalan.
-    console.log(`[FORGOT PASSWORD] Tautan reset untuk ${email}: ${resetUrl}`);
+    // 🔧 FIX #5 lanjutan: sebelumnya tautan reset cuma di-log ke console (email
+    // tidak pernah benar-benar terkirim). Sekarang disambungkan ke sendEmail()
+    // dari emailService.js. Kegagalan kirim TIDAK menggagalkan request --
+    // tetap kembalikan genericResponse (200) supaya endpoint ini tidak bisa
+    // dipakai menebak email terdaftar, tapi kegagalan tetap dicatat di log
+    // agar ketahuan dari server.
+    const emailHtml = `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>Atur Ulang Kata Sandi</h2>
+        <p>Halo ${user.name || ""},</p>
+        <p>Kami menerima permintaan untuk mengatur ulang kata sandi akun ScrumApps Anda. Klik tombol di bawah untuk melanjutkan:</p>
+        <p style="text-align: center; margin: 32px 0;">
+          <a href="${resetUrl}" style="background:#D31217;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:bold;">
+            Atur Ulang Kata Sandi
+          </a>
+        </p>
+        <p>Atau salin tautan ini ke browser Anda:<br>${resetUrl}</p>
+        <p style="color:#888;font-size:13px;">Tautan ini berlaku selama 1 jam. Jika Anda tidak meminta ini, abaikan email ini.</p>
+      </div>
+    `;
+
+    const emailSent = await sendEmail(email, "Atur Ulang Kata Sandi - ScrumApps", emailHtml);
+    if (!emailSent) {
+      console.error(`[FORGOT PASSWORD] Gagal mengirim email reset ke ${email}, tautan tetap dicatat untuk debugging: ${resetUrl}`);
+    }
 
     return res.status(200).json(genericResponse);
 
