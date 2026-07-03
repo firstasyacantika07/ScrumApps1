@@ -51,7 +51,7 @@ router.delete('/:id', userController.deleteUser);
 router.put('/:id', async (req, res) => {
   try {
     const { name, gender, email, phone_number, password } = req.body;
-    const tenantId = req.user.tenant_id;
+    const tenantId = req.user?.tenant_id; // 🔧 Menggunakan optional chaining demi keamanan
     const db = require('../config/db');
     const bcrypt = require('bcryptjs');
 
@@ -62,14 +62,24 @@ router.put('/:id', async (req, res) => {
       });
     }
 
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email wajib diisi."
+      });
+    }
+
+    // 🔧 FIX: Normalisasi email agar konsisten dengan proses login & register (lowercase + trim)
+    const cleanEmail = email.trim().toLowerCase();
+
     let query = `
       UPDATE tbr_users
       SET name=?, gender=?, email=?, phone_number=?
     `;
-    let params = [name, gender, email, phone_number];
+    let params = [name ? name.trim() : name, gender || 'male', cleanEmail, phone_number || null];
 
     if (password) {
-      const hash = await bcrypt.hash(password, 10);
+      const hash = await bcrypt.hash(password.trim(), 10);
       query += `, password=?`;
       params.push(hash);
     }

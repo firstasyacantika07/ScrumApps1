@@ -11,21 +11,21 @@ const teamController = require('../controllers/teamController');
 const githubController = require('../controllers/githubController'); 
 
 /* =====================================================
-    🔓 PUBLIC / EXTERNAL ROUTES (TANPA TOKEN JWT)
+   🔓 PUBLIC / EXTERNAL ROUTES (TANPA TOKEN JWT)
    ===================================================== */
 // Dipanggil langsung oleh GitHub setelah proses OAuth berhasil
 router.get('/github/callback', githubController.handleGitHubCallback);
 
 
 /* =====================================================
-    🔒 PROTECTED ROUTES (Semua rute di bawah wajib login JWT)
+   🔒 PROTECTED ROUTES (Semua rute di bawah wajib login JWT)
    ===================================================== */
 router.use(verifyToken);
 
 
 /* =====================================================
-    ⭐ GLOBAL PROJECT & DASHBOARD ROUTES (BASE: /api/projects)
-    Harus ditaruh di atas sebelum wildcard :projectId atau :id memakan string statis
+   ⭐ GLOBAL PROJECT & DASHBOARD ROUTES (BASE: /api/projects)
+   Harus ditaruh di atas sebelum wildcard :projectId atau :id memakan string statis
    ===================================================== */
 
 // 📂 Rute: Mengambil list seluruh proyek milik tenant (Merespon GET http://localhost:5000/api/projects)
@@ -45,7 +45,7 @@ router.get('/stats', projectController.getProjectStats);
 
 
 /* =====================================================
-    🌟 GITHUB INTEGRATION STATIS (GLOBAL)
+   🌟 GITHUB INTEGRATION STATIS (GLOBAL)
    ===================================================== */
 router.get('/github/oauth-url', 
     authorize(['superadmin', 'admin', 'businessanalyst', 'teamdeveloper']), 
@@ -79,25 +79,15 @@ router.post('/github/connect-personal',
 
 
 /* =====================================================
-    🛠️ SHORT FALLBACK ROUTES
-   ===================================================== */
-router.put('/backlogs/:id', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), backlogController.updateBacklog);
-router.delete('/backlogs/:id', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), backlogController.deleteBacklog);
-
-router.put('/vision-boards/:id', projectController.updateVision);
-router.delete('/vision-boards/:id', projectController.deleteVision);
-
-
-/* =====================================================
-    ⚠️ PUBLIC WEBHOOK WITH PROJECT ID 
-    (Dipindah ke bawah rute statis agar aman dari collision)
+   ⚠️ PUBLIC WEBHOOK WITH PROJECT ID 
+   (Dipindah ke bawah rute statis agar aman dari collision)
    ===================================================== */
 // Webhook Receiver dari GitHub
 router.post('/:projectId/github-link-action', githubController.linkGitActionToKanban);
 
 
 /* =====================================================
-    👥 TEAM ROUTES & TEAM LIMITATION SECURITY
+   👥 TEAM ROUTES & TEAM LIMITATION SECURITY
    ===================================================== */
 router.get('/:projectId/members', teamController.getTeamByProject);
 router.post('/:projectId/members', authorize(['superadmin', 'admin']), checkTeamLimit, teamController.addTeamMember);
@@ -106,7 +96,7 @@ router.delete('/:projectId/members/:memberId', authorize(['superadmin', 'admin']
 
 
 /* =====================================================
-    📋 BACKLOG ROUTES
+   📋 BACKLOG ROUTES
    ===================================================== */
 router.get('/:projectId/backlogs', backlogController.getBacklogsByProject);
 router.get('/:projectId/backlogs/export-pdf', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst', 'teamdeveloper']), backlogController.exportBacklogToPDF);
@@ -116,7 +106,7 @@ router.delete('/:projectId/backlogs/:id', authorize(['superadmin', 'admin', 'pro
 
 
 /* =====================================================
-    🏃 SPRINT ROUTES
+   🏃 SPRINT ROUTES
    ===================================================== */
 router.get('/:projectId/sprints', projectController.getProjectSprints);
 router.post('/:projectId/sprints', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), projectController.createSprint);
@@ -125,7 +115,7 @@ router.delete('/:projectId/sprints/:id', authorize(['superadmin', 'admin', 'proj
 
 
 /* =====================================================
-    🗂️ DEVELOPMENT / TASK ROUTES (KANBAN)
+   🗂️ DEVELOPMENT / TASK ROUTES (KANBAN)
    ===================================================== */
 router.get('/:projectId/developments', projectController.getProjectDevelopments);
 router.post('/:projectId/developments', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst', 'teamdeveloper']), projectController.createDevelopment);
@@ -134,7 +124,7 @@ router.delete('/:projectId/developments/:devId', authorize(['superadmin', 'admin
 
 
 /* =====================================================
-    👁️ VISION BOARD ROUTES
+   👁️ VISION BOARD ROUTES
    ===================================================== */
 router.get('/:projectId/vision-boards', projectController.getProjectVisions);
 router.post('/:projectId/vision-boards', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst']), projectController.createVision);
@@ -143,13 +133,13 @@ router.delete('/:projectId/vision-boards/:id', authorize(['superadmin', 'admin',
 
 
 /* =====================================================
-    📜 ACTIVITY LOG ROUTES
+   📜 ACTIVITY LOG ROUTES
    ===================================================== */
 router.get('/:projectId/logs', projectController.getProjectLogs);
 
 
 /* =====================================================
-    🐙 GITHUB INTEGRATION DINAMIS (BERBASIS PROJECT ID)
+   🐙 GITHUB INTEGRATION DINAMIS (BERBASIS PROJECT ID)
    ===================================================== */
 router.get('/:projectId/github-status', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst', 'teamdeveloper']), githubController.getIntegrationByProject);
 router.get('/:projectId/github-activity', authorize(['superadmin', 'admin', 'projectowner', 'businessanalyst', 'teamdeveloper']), githubController.getRepoActivity);
@@ -160,7 +150,7 @@ router.post('/:projectId/github-pat', authorize(['superadmin', 'admin']), github
 
 
 /* =====================================================
-    🚨 PROJECT ID WILDCARD (MUTLAK DI PALING BAWAH FILE)
+   🚨 PROJECT ID WILDCARD (MUTLAK DI PALING BAWAH FILE)
    ===================================================== */
 router.get('/:id', projectController.getProjectById);
 router.put('/:id', authorize(['superadmin', 'admin', 'projectowner']), projectController.updateProject);

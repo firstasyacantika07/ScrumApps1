@@ -66,7 +66,7 @@ app.use('/api/superadmin', superadminRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/github', verifyToken, githubRoutes);
 app.use('/api/dashboard', verifyToken, dashboardRoutes);
-app.use('/api/billing', billingRoutes); 
+app.use('/api/billing', require('./routes/billingRoutes'));
 app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/workspace/billing', subscriptionRoutes);
 app.use('/api/notifications', notificationRoutes);

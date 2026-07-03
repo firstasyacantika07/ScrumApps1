@@ -14,23 +14,29 @@ exports.getAllUsersGlobal = async (req, res) => {
       ORDER BY id DESC
     `);
 
-    return res.status(200).json(rows);
+    return res.status(200).json({
+      success: true,
+      message: "Seluruh data user global berhasil ditarik.",
+      data: rows
+    });
   } catch (err) {
     console.error("❌ GET GLOBAL USERS ERROR:", err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
 // =========================================================================
-// 🏢 2. GET USERS BY TENANT (Khusus Tenant Admin - Hanya Anggota Organisasinya)
+// 🏢 2. GET USERS BY TENANT (Khusus Tenant Admin / Merespon Halaman Users.jsx / Members.jsx)
 // =========================================================================
 exports.getUsersByTenant = async (req, res) => {
   try {
-    // tenant_id diambil secara aman dari token JWT pengguna yang sedang login (via middleware auth)
     const tenantId = req.user?.tenant_id;
 
     if (!tenantId) {
-      return res.status(400).json({ success: false, message: "Identifikasi Tenant tidak valid pada sesi Anda." });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Identifikasi Tenant tidak valid pada sesi Anda." 
+      });
     }
 
     // Filter ketat dengan WHERE tenant_id = ? demi mencegah kebocoran data antar tenant
@@ -41,15 +47,19 @@ exports.getUsersByTenant = async (req, res) => {
       ORDER BY name ASC
     `, [tenantId]);
 
-    return res.status(200).json(rows);
+    return res.status(200).json({
+      success: true,
+      message: "Data anggota tim berhasil dimuat.",
+      data: rows
+    });
   } catch (err) {
     console.error("❌ GET TENANT USERS ERROR:", err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
 // =========================================================================
-// 🚀 3. CREATE USER (Bawaan Project / MVP Fallback)
+// 🚀 3. CREATE USER (Bawaan Project / Dashboard Modal / Auto-Join Project)
 // =========================================================================
 exports.createUser = async (req, res) => {
   try {
@@ -62,28 +72,52 @@ exports.createUser = async (req, res) => {
       gender
     } = req.body;
 
+    const tenantId = req.user?.tenant_id;
+
+    // Proteksi utama: Pastikan admin memiliki tenant_id yang jelas
+    if (!tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: "Akses ditolak: Workspace Anda tidak teridentifikasi."
+      });
+    }
+
     // VALIDASI WAJIB
     if (!name || !email || !password) {
       return res.status(400).json({
-        message: "name, email, password wajib diisi"
+        success: false,
+        message: "Nama, email, dan password wajib diisi."
+      });
+    }
+
+    // Normalisasi email (trim + lowercase)
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Cek apakah email duplikat secara global
+    const [existing] = await db.query('SELECT id FROM tbr_users WHERE email = ?', [cleanEmail]);
+    if (existing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Email ini sudah terdaftar di sistem."
       });
     }
 
     // Amankan password dengan bcrypt hash
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcrypt.hash(password.trim(), 10);
+    
+    // Gunakan string standar lowercase seperti teamdeveloper, productowner, scrummaster
+    const userRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
 
-    // Ambil tenant_id dari admin yang membuat atau fallback ke tenant ID 1 jika self-register
-    const tenantId = req.user?.tenant_id || 1;
-
-    await db.query(
+    // A. Daftarkan pengguna baru ke database terikat dengan tenantId admin
+    const [insertResult] = await db.query(
       `INSERT INTO tbr_users 
       (name, email, password, role, phone_number, gender, tenant_id, package_type, subscription_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        name,
-        email,
+        name.trim(),
+        cleanEmail,
         hash,
-        role || 'TeamDeveloper', 
+        userRole, 
         phone_number || null,
         gender || 'male',        
         tenantId,                
@@ -92,14 +126,33 @@ exports.createUser = async (req, res) => {
       ]
     );
 
+    const newUserId = insertResult.insertId;
+
+    // 🔥 B. SINKRONISASI OTOMATIS: Ambil seluruh project di tenant ini
+    const [activeProjects] = await db.query(
+      `SELECT id FROM tbr_projects WHERE tenant_id = ?`, 
+      [tenantId]
+    );
+
+    if (activeProjects.length > 0) {
+      // 🔧 FIX: Ubah target nama kolom menjadi 'role_in_project' agar sinkron dengan teamController.js
+      const memberInsertValues = activeProjects.map(proj => [proj.id, newUserId, userRole]);
+      await db.query(
+        `INSERT INTO tbr_project_members (project_id, user_id, role_in_project) VALUES ?`,
+        [memberInsertValues]
+      );
+    }
+
     return res.status(201).json({
-      message: "User berhasil dibuat"
+      success: true,
+      message: "User berhasil dibuat dan otomatis terhubung ke proyek workspace."
     });
 
   } catch (err) {
-    console.error("CREATE USER ERROR:", err);
+    console.error("❌ CREATE USER ERROR:", err);
     return res.status(500).json({
-      message: "Server error",
+      success: false,
+      message: "Gagal membuat user baru.",
       error: err.message
     });
   }
@@ -110,13 +163,30 @@ exports.createUser = async (req, res) => {
 // =========================================================================
 exports.deleteUser = async (req, res) => {
   try {
-    await db.query(
-      'DELETE FROM tbr_users WHERE id=?',
-      [req.params.id]
-    );
+    const userId = req.params.id;
+    const tenantId = req.user?.tenant_id;
 
-    return res.json({ message: "User deleted" });
+    if (!tenantId) {
+      return res.status(403).json({ success: false, message: "Sesi tidak valid." });
+    }
+
+    // Keamanan Tambahan: Pastikan user yang dihapus berada di tenant yang sama dengan admin
+    const [userCheck] = await db.query('SELECT id FROM tbr_users WHERE id = ? AND tenant_id = ?', [userId, tenantId]);
+    if (userCheck.length === 0) {
+      return res.status(403).json({ success: false, message: "Akses Ditolak: User tidak ditemukan di workspace Anda." });
+    }
+
+    // Menghapus dari tbr_users otomatis membersihkan relasi jika foreign key diset CASCADE,
+    // namun kita eksekusi manual juga ke tbr_project_members demi keamanan data terintegrasi
+    await db.query('DELETE FROM tbr_project_members WHERE user_id = ?', [userId]);
+    await db.query('DELETE FROM tbr_users WHERE id = ?', [userId]);
+
+    return res.status(200).json({ 
+      success: true,
+      message: "User dan hak keanggotaan proyek berhasil dihapus secara permanen." 
+    });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error("❌ DELETE USER ERROR:", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 };

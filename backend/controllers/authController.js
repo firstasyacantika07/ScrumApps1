@@ -281,12 +281,12 @@ exports.register = async (req, res) => {
   try {
     const { name, email, password, company_name } = req.body;
 
-    // 1. Validasi input dasar
-    if (!name || !email || !password) {
+    // 1. Validasi input dasar (Kini menyertakan company_name)
+    if (!name || !email || !password || !company_name) {
       connection.release();
       return res.status(400).json({
         success: false,
-        message: "Nama, email, dan password wajib diisi",
+        message: "Nama, nama perusahaan, email, dan password wajib diisi",
       });
     }
 
@@ -319,10 +319,8 @@ exports.register = async (req, res) => {
     const trialEnd = new Date();
     trialEnd.setDate(trialEnd.getDate() + 14);
 
-    // 🔧 FIX: Generate subdomain unik (kolom ini UNIQUE di tbr_tenants).
-    // Kalau dibiarkan kosong, MySQL isi default '' dan registrasi kedua dst akan
-    // selalu gagal ER_DUP_ENTRY karena banyak baris bentrok di subdomain = ''.
-    const baseSlug = (company_name || name || "workspace")
+    // Generate subdomain unik berdasarkan company_name
+    const baseSlug = company_name
       .toString()
       .trim()
       .toLowerCase()
@@ -332,11 +330,13 @@ exports.register = async (req, res) => {
     const randomSuffix = Math.random().toString(36).slice(2, 8); // 6 karakter acak
     const subdomain = `${baseSlug}-${randomSuffix}`;
 
+    // 🔧 FIX: Memasukkan data 'company_name' ke dalam query insert tabel tbr_tenants
     const [tenantResult] = await connection.query(
       `INSERT INTO tbr_tenants
-        (package_type, billing_cycle, status, trial_start, trial_end, subdomain)
-       VALUES ('FREE', 'TRIAL', 'active', ?, ?, ?)`,
+        (company_name, package_type, billing_cycle, status, trial_start, trial_end, subdomain)
+       VALUES (?, 'FREE', 'TRIAL', 'active', ?, ?, ?)`,
       [
+        company_name.trim(),
         trialStart.toISOString().slice(0, 19).replace("T", " "),
         trialEnd.toISOString().slice(0, 19).replace("T", " "),
         subdomain,
@@ -352,7 +352,7 @@ exports.register = async (req, res) => {
     const [userResult] = await connection.query(
       `INSERT INTO tbr_users (name, email, password, role, tenant_id)
        VALUES (?, ?, ?, 'admin', ?)`,
-      [name, email, hashedPassword, tenantId]
+      [email.trim().toLowerCase(), name, hashedPassword, tenantId]
     );
 
     await connection.commit();
@@ -408,6 +408,7 @@ exports.register = async (req, res) => {
     });
   }
 };
+
 // ======================================================
 // 🔍 DEBUG SEMENTARA: List semua user (hapus setelah masalah selesai!)
 // ======================================================

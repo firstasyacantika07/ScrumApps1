@@ -8,41 +8,26 @@ const paymentController = require('../controllers/paymentController');
 // Middleware auth
 const { verifyToken, authorize } = require('../middleware/auth');
 
-// ======================================================
-// 🌐 WEBHOOK MIDTRANS (PUBLIC — HARUS SEBELUM router.use(verifyToken)!)
-// ======================================================
-/**
- * ⚠️ FIX: sebelumnya diarahkan ke subscriptionController.handleMidtransWebhook, yang
- * baca dari tabel `transactions` -- tabel yang TIDAK PERNAH ditulis oleh alur checkout
- * (createPayment/createCheckoutSession keduanya nulis ke tbr_payments). Akibatnya webhook
- * itu selalu gagal cari order ("not found") dan tbr_tenants tidak pernah ter-update.
- *
- * SEKARANG: diarahkan ke paymentController.handleMidtransWebhook, yang baca dari
- * tbr_payments (tabel yang benar) dan mem-propagate ke tbr_subscriptions + tbr_tenants + tbr_users.
- *
- * ⚠️ PENTING: route ini WAJIB tetap di atas router.use(verifyToken) di bawah.
- * Midtrans memanggil endpoint ini server-to-server TANPA JWT/Bearer token user,
- * jadi kalau ikut kena verifyToken, notifikasi akan selalu ditolak 401 dan
- * tbr_tenants tidak akan pernah ter-update walau transaksi sukses di Midtrans.
- *
- * Endpoint: POST /api/workspace/billing/webhook
- * (sesuaikan path ini dengan "Payment Notification URL" di dashboard Midtrans kamu)
- */
+/* =========================================================================
+   🌐 WEBHOOK MIDTRANS (PUBLIC — HARUS SEBELUM router.use(verifyToken)!)
+   ========================================================================= */
+// Dipanggil server-to-server oleh Midtrans tanpa menggunakan token Bearer/JWT
 router.post('/webhook', paymentController.handleMidtransWebhook);
 
-/**
- * 🔒 SEMUA ROUTE BILLING DI BAWAH INI WAJIB LOGIN
- * Menjaga semua endpoint di bawah ini agar hanya bisa diakses user terautentikasi
- */
+
+/* =========================================================================
+   🔒 PROTECTED ROUTES (Semua rute di bawah wajib login JWT)
+   ========================================================================= */
 router.use(verifyToken);
 
-// ======================================================
-// 📊 PLANS & STATUS ENDPOINTS
-// ======================================================
+
+/* =========================================================================
+   📊 PLANS & STATUS ENDPOINTS
+   ========================================================================= */
 
 /**
- * 🔥 Mengambil status billing/langganan paket tenant aktif saat ini beserta utilisasi kuota
- * Endpoint: GET /api/workspace/billing/status
+ * 📊 GET: Mengambil status billing tenant saat ini & sisa kuota utilisasi
+ * Endpoint: GET /api/billing/status (atau sesuai mounting di server.js Anda)
  */
 router.get("/status", async (req, res) => {
     try {
@@ -55,13 +40,7 @@ router.get("/status", async (req, res) => {
             });
         }
 
-        // 1. Ambil informasi tenant/perusahaan BESERTA data langganan langsung dari DB
-        //    ⚠️ SEBELUMNYA: package_type/billing_cycle diambil dari req.user (isi JWT token),
-        //    yang basi kalau token belum di-refresh sejak terakhir beli paket. Ini penyebab
-        //    "subscription admin baru belum termuat di dashboard" & "admin/superadmin ga sinkron",
-        //    karena setiap admin di tenant yang sama bisa punya JWT dengan snapshot data berbeda-beda.
-        //    SEKARANG: selalu query fresh ke tbr_tenants, jadi SEMUA admin di tenant yang sama
-        //    otomatis melihat data yang sama & real-time.
+        // Query fresh ke tbr_tenants agar data bersifat real-time untuk semua admin/superadmin
         const [tenantRows] = await db.query(
             `SELECT id, company_name, package_type, billing_cycle, subscription_status,
                     trial_end, subscription_ends_at
@@ -78,13 +57,12 @@ router.get("/status", async (req, res) => {
 
         const tenant = tenantRows[0];
 
-        // 2. Ambil data langganan dari tenant (bukan dari JWT lagi)
         const packageType = (tenant.package_type || 'FREE').toUpperCase();
         const billingCycle = tenant.billing_cycle || 'NONE';
         const trialEnd = tenant.trial_end;
         const subscriptionEndsAt = tenant.subscription_ends_at;
 
-        // 3. Hitung sisa hari aktif langganan
+        // Hitung sisa masa aktif paket
         let remainingDays = 0;
         const referenceEndDate = billingCycle === 'TRIAL' ? trialEnd : subscriptionEndsAt;
         if (referenceEndDate) {
@@ -92,25 +70,25 @@ router.get("/status", async (req, res) => {
             remainingDays = diffMs > 0 ? Math.ceil(diffMs / (1000 * 60 * 60 * 24)) : 0;
         }
 
-        // 4. Hitung jumlah project yang sudah digunakan
+        // Hitung akumulasi project yang telah dibuat oleh tenant ini
         const [projectRows] = await db.query(
             'SELECT COUNT(*) as total FROM tbr_projects WHERE tenant_id = ?',
             [tenantId]
         );
         const projectUsed = projectRows[0]?.total || 0;
 
-        // 5. Hitung jumlah anggota tim yang sudah terdaftar
+        // Hitung akumulasi anggota tim (users) yang bergabung di tenant ini
         const [teamRows] = await db.query(
             'SELECT COUNT(*) as total FROM tbr_users WHERE tenant_id = ?',
             [tenantId]
         );
         const teamUsed = teamRows[0]?.total || 0;
 
-        // 🔒 Batas kuota konsisten dengan middleware/SubscriptionsMiddleware.js
+        // Definisi limitasi kuota langganan SaaS
         const PACKAGE_LIMITS = {
             FREE: { project: 1, team: 5 },
             PRO: { project: 15, team: 25 },
-            ENTERPRISE: { project: 999, team: 999 } // Diubah dari null ke 999 agar konsisten dengan fallback UI numerik
+            ENTERPRISE: { project: 999, team: 999 }
         };
         const limits = PACKAGE_LIMITS[packageType] || PACKAGE_LIMITS.FREE;
 
@@ -141,12 +119,12 @@ router.get("/status", async (req, res) => {
 });
 
 /**
- * 🎯 GET: Ambil semua daftar paket (Plans) dari database
+ * 🎯 GET: Mengambil daftar penawaran paket langganan dari database
  * Endpoint: GET /api/billing/plans
  */
 router.get("/plans", async (req, res) => {
     try {
-        const [plans] = await db.query(`SELECT * FROM tbr_plans`);
+        const [plans] = await db.query(`SELECT * FROM tbr_plans ORDER BY id ASC`);
         return res.status(200).json({
             success: true,
             data: plans
@@ -160,46 +138,37 @@ router.get("/plans", async (req, res) => {
     }
 });
 
-// ======================================================
-// 💳 MIDTRANS & TRANSACTION ENDPOINTS
-// ======================================================
 
-/**
- * ⚡ POST: Buat transaksi via Midtrans Snap (Mendapatkan token & redirect URL)
- * Endpoint: POST /api/billing/payment/create-transaction
- */
+/* =========================================================================
+   💳 MIDTRANS & TRANSACTION ENDPOINTS
+   ========================================================================= */
+
+// ⚡ Mengenerate token transaksi via Midtrans Snap (Modal Popup)
 router.post('/payment/create-transaction', paymentController.createPayment);
 
-/**
- * 📱 POST: Buat transaksi via Midtrans Core API (Direct Charge QRIS/VA)
- * Endpoint: POST /api/billing/payment/charge
- */
+// 📱 Eksekusi direct charge via Midtrans Core API (E-Wallet / Virtual Account)
 router.post('/payment/charge', paymentController.createCheckoutSession);
 
-/**
- * 🔍 GET: Cek status pembayaran ke Midtrans berdasarkan Order ID
- * Endpoint: GET /api/billing/payment/status/:orderId
- */
+// 🔍 Melakukan polling status manual pengecekan pembayaran berdasarkan Order ID
 router.get('/payment/status/:orderId', paymentController.checkPaymentStatus);
 
-/**
- * 🚀 POST: Aktivasi/Upgrade paket langganan user (Subscription)
- * Endpoint: POST /api/billing/subscription/activate
- */
+// 🚀 Aktivasi manual / bypassing perpanjangan paket subscription
 router.post('/subscription/activate', paymentController.activatePlan);
 
-// ======================================================
-// 📄 HISTORY & MANAGEMENT ENDPOINTS (ADMIN ONLY)
-// ======================================================
+
+/* =========================================================================
+   📄 HISTORY & MANAGEMENT ENDPOINTS (ADMIN ONLY)
+   ========================================================================= */
 
 /**
- * 📜 GET: Riwayat seluruh transaksi (Hanya Superadmin)
+ * 📜 GET: Menampilkan daftar riwayat aktivitas transaksi finansial (Hanya Superadmin)
  * Endpoint: GET /api/billing/history
  */
-router.get('/history', authorize('Superadmin'), async (req, res) => {
+router.get('/history', authorize(['superadmin', 'Superadmin']), async (req, res) => {
     try {
+        // 🔥 FIX: Nama tabel diubah dari tbr_payment menjadi tbr_payments agar sinkron
         const [history] = await db.query(
-            `SELECT * FROM tbr_payment ORDER BY created_at DESC LIMIT 50`
+            `SELECT * FROM tbr_payments ORDER BY created_at DESC LIMIT 50`
         );
         
         return res.status(200).json({
@@ -217,8 +186,7 @@ router.get('/history', authorize('Superadmin'), async (req, res) => {
 });
 
 /**
- * ❌ DELETE: Batalkan/Hapus transaksi tertentu berdasarkan ID
- * Endpoint: DELETE /api/billing/:id
+ * ❌ DELETE: Menghapus log/membatalkan entitas draf transaksi pembayaran
  */
 router.delete('/:id', async (req, res) => {
     try {

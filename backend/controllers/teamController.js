@@ -1,91 +1,97 @@
+// controllers/teamController.js
 const db = require('../config/db');
 
 /**
  * 👥 1. ADD TEAM MEMBER (Sudah Terproteksi checkTeamLimit di Router)
+ * =========================================================================
  */
 exports.addTeamMember = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { user_id, role } = req.body;
-    const tenantId = req.user?.tenant_id; // Diambil dari JWT verifyToken
+    const { user_id, role } = req.body; // 'role' dikirim dari dropdown frontend
+    const tenantId = req.user?.tenant_id;
 
-    // 🛠️ FIX: cegah bind parameter undefined -> mysql2 crash jadi 500 mentah
     if (!projectId || isNaN(projectId)) {
-      return res.status(400).json({ message: "ID Proyek tidak valid." });
+      return res.status(400).json({ success: false, message: "ID Proyek tidak valid." });
     }
     if (!user_id) {
-      return res.status(400).json({ message: "user_id wajib diisi." });
+      return res.status(400).json({ success: false, message: "user_id wajib diisi." });
     }
     if (!tenantId) {
-      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun." });
+      return res.status(403).json({ success: false, message: "Akun Anda tidak terhubung ke workspace manapun." });
     }
 
-    // Validasi Keamanan: Pastikan proyek yang dituju benar-block milik tenant Admin yang login
+    // Validasi Keamanan: Pastikan proyek milik tenant Admin yang login
     const [projectCheck] = await db.query(
       'SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?',
       [projectId, tenantId]
     );
     if (projectCheck.length === 0) {
-      return res.status(403).json({ message: "Akses Ditolak: Proyek tidak berada di bawah workspace Anda." });
+      return res.status(403).json({ success: false, message: "Akses Ditolak: Proyek tidak berada di bawah workspace Anda." });
     }
 
-    // Standardisasi string role agar konsisten (lowercase, tanpa spasi)
-    const cleanRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
-
-    // Cek apakah user yang mau diundang sudah terdaftar di proyek ini
+    // Cek duplikasi anggota di proyek ini
     const [existing] = await db.query(
       `SELECT id FROM tbr_project_members WHERE project_id = ? AND user_id = ?`,
       [projectId, user_id]
     );
 
     if (existing.length > 0) {
-      return res.status(400).json({ message: "User ini sudah menjadi anggota tim aktif di proyek ini." });
+      return res.status(400).json({ success: false, message: "User ini sudah menjadi anggota tim aktif di proyek ini." });
     }
 
-    // Insert ke tabel baru: tbr_project_members
+    // Standardisasi string role agar aman disimpan
+    const cleanRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
+
+    // 🔧 FIX: Menyimpan nilai ke kolom role_in_project
     await db.query(
-      `INSERT INTO tbr_project_members (project_id, user_id, role, created_at, updated_at) 
-       VALUES (?, ?, ?, NOW(), NOW())`,
+      `INSERT INTO tbr_project_members (project_id, user_id, role_in_project, created_at) 
+       VALUES (?, ?, ?, NOW())`,
       [projectId, user_id, cleanRole]
     );
 
-    res.status(201).json({ success: true, message: "Anggota tim berhasil ditambahkan secara manual." });
+    return res.status(201).json({ success: true, message: "Anggota tim berhasil ditambahkan ke proyek." });
 
   } catch (err) {
     console.error("❌ ADD MEMBER ERROR:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
 /**
- * 🔍 2. GET TEAM BY PROJECT (Aman Multi-Tenant)
+ * 🔍 2. GET TEAM BY PROJECT (Membaca Kolom role_in_project)
+ * =========================================================================
  */
 exports.getTeamByProject = async (req, res) => {
   try {
     const { projectId } = req.params;
     const tenantId = req.user?.tenant_id;
 
-    // 🛠️ FIX: mysql2 akan throw "Bind parameters must not contain undefined"
-    // (jadi 500 tanpa pesan jelas) kalau projectId atau tenantId undefined.
-    // Validasi dulu di sini supaya errornya jelas & tidak meng-crash query.
     if (!projectId || isNaN(projectId)) {
-      return res.status(400).json({ message: "ID Proyek tidak valid." });
+      return res.status(400).json({ success: false, message: "ID Proyek tidak valid." });
     }
     if (!tenantId) {
-      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun. Silakan hubungi administrator." });
+      return res.status(403).json({ success: false, message: "Akun Anda tidak terhubung ke workspace manapun." });
     }
 
-    // Pastikan proyek milik tenant bersangkutan sebelum menarik data tim
     const [projectCheck] = await db.query(
       'SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?',
       [projectId, tenantId]
     );
     if (projectCheck.length === 0) {
-      return res.status(403).json({ message: "Akses Ditolak." });
+      return res.status(403).json({ success: false, message: "Akses Ditolak." });
     }
     
+    // 🔧 FIX: Tarik pm.role_in_project sebagai 'role' agar frontend tidak perlu mengubah nama properti
     const [rows] = await db.query(
-      `SELECT pm.id, pm.project_id, pm.user_id, pm.role, pm.created_at, u.name, u.email 
+      `SELECT 
+        pm.id, 
+        pm.project_id, 
+        pm.user_id, 
+        pm.role_in_project AS role, 
+        pm.created_at, 
+        u.name, 
+        u.email 
        FROM tbr_project_members pm
        JOIN tbr_users u ON pm.user_id = u.id 
        WHERE pm.project_id = ?
@@ -93,15 +99,20 @@ exports.getTeamByProject = async (req, res) => {
       [projectId]
     );
     
-    res.json(rows);
+    return res.status(200).json({
+      success: true,
+      message: "Data anggota tim proyek berhasil dimuat.",
+      data: rows
+    });
   } catch (err) {
     console.error("❌ GET TEAM ERROR:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
 /**
- * 🔄 3. UPDATE TEAM MEMBER ROLE (Aman Multi-Tenant)
+ * 🔄 3. UPDATE TEAM MEMBER ROLE (Mengubah Peran Spesifik Proyek)
+ * =========================================================================
  */
 exports.updateTeamMember = async (req, res) => {
   try {
@@ -109,15 +120,13 @@ exports.updateTeamMember = async (req, res) => {
     const { role } = req.body;
     const tenantId = req.user?.tenant_id;
 
-    // 🛠️ FIX: cegah bind parameter undefined -> mysql2 crash jadi 500 mentah
     if (!projectId || isNaN(projectId) || !memberId || isNaN(memberId)) {
-      return res.status(400).json({ message: "ID Proyek atau ID Anggota tidak valid." });
+      return res.status(400).json({ success: false, message: "ID Proyek atau ID Anggota tidak valid." });
     }
     if (!tenantId) {
-      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun." });
+      return res.status(403).json({ success: false, message: "Akun Anda tidak terhubung ke workspace manapun." });
     }
 
-    // Validasi berlapis: Pastikan member yang di-update berada di dalam proyek milik tenant yang sah
     const [validCheck] = await db.query(
       `SELECT pm.id FROM tbr_project_members pm
        JOIN tbr_projects p ON pm.project_id = p.id
@@ -126,40 +135,40 @@ exports.updateTeamMember = async (req, res) => {
     );
 
     if (validCheck.length === 0) {
-      return res.status(403).json({ message: "Akses Ditolak: Data tidak ditemukan atau berada di luar koridor tenant Anda." });
+      return res.status(403).json({ success: false, message: "Akses Ditolak: Data tidak valid." });
     }
 
     const cleanRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
 
+    // 🔧 FIX: Update langsung pada kolom role_in_project di tabel persimpangan
     await db.query(
-      `UPDATE tbr_project_members SET role = ?, updated_at = NOW() WHERE id = ?`,
+      `UPDATE tbr_project_members SET role_in_project = ? WHERE id = ?`,
       [cleanRole, memberId]
     );
 
-    res.json({ success: true, message: "Hak akses role anggota tim berhasil diperbarui secara manual." });
+    return res.status(200).json({ success: true, message: "Peran anggota di proyek ini berhasil diperbarui." });
   } catch (err) {
     console.error("❌ UPDATE MEMBER ERROR:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
 /**
  * 🗑️ 4. DELETE TEAM MEMBER (Aman Multi-Tenant)
+ * =========================================================================
  */
 exports.deleteTeamMember = async (req, res) => {
   try {
     const { projectId, memberId } = req.params;
     const tenantId = req.user?.tenant_id;
 
-    // 🛠️ FIX: cegah bind parameter undefined -> mysql2 crash jadi 500 mentah
     if (!projectId || isNaN(projectId) || !memberId || isNaN(memberId)) {
-      return res.status(400).json({ message: "ID Proyek atau ID Anggota tidak valid." });
+      return res.status(400).json({ success: false, message: "ID Proyek atau ID Anggota tidak valid." });
     }
     if (!tenantId) {
-      return res.status(403).json({ message: "Akun Anda tidak terhubung ke workspace manapun." });
+      return res.status(403).json({ success: false, message: "Akun Anda tidak terhubung ke workspace manapun." });
     }
 
-    // Validasi berlapis sebelum eksekusi hapus data tim
     const [validCheck] = await db.query(
       `SELECT pm.id FROM tbr_project_members pm
        JOIN tbr_projects p ON pm.project_id = p.id
@@ -168,13 +177,42 @@ exports.deleteTeamMember = async (req, res) => {
     );
 
     if (validCheck.length === 0) {
-      return res.status(403).json({ message: "Akses Ditolak: Data tidak valid." });
+      return res.status(403).json({ success: false, message: "Akses Ditolak: Data tidak ditemukan." });
     }
 
     await db.query('DELETE FROM tbr_project_members WHERE id = ?', [memberId]);
-    res.json({ success: true, message: "Anggota tim berhasil dikeluarkan dari proyek secara manual." });
+    return res.status(200).json({ success: true, message: "Anggota tim berhasil dikeluarkan dari proyek." });
   } catch (err) {
     console.error("❌ DELETE MEMBER ERROR:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+/**
+ * 🏢 5. GET ALL USERS IN WORKSPACE (Menampilkan Semua Anggota Perusahaan untuk Dropdown)
+ * =========================================================================
+ */
+exports.getWorkspaceUsers = async (req, res) => {
+  try {
+    const tenantId = req.user?.tenant_id;
+
+    if (!tenantId) {
+      return res.status(403).json({ success: false, message: "Akun Anda tidak terhubung ke workspace manapun." });
+    }
+
+    // Mengambil semua user yang berada di bawah naungan tenant_id yang sama
+    const [users] = await db.query(
+      `SELECT id, name, email, role FROM tbr_users WHERE tenant_id = ? ORDER BY name ASC`,
+      [tenantId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Daftar anggota workspace berhasil dimuat.",
+      data: users
+    });
+  } catch (err) {
+    console.error("❌ GET WORKSPACE USERS ERROR:", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 };

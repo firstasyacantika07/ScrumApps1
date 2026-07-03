@@ -42,7 +42,7 @@ exports.createPayment = async (req, res) => {
       });
     }
 
-    // 🔒 WAJIB ADA tenant_id -- tanpa ini webhook tidak akan tahu tenant mana yang harus diupdate
+    // 🔒 WAJIB ADA tenant_id
     const tenantId = req.user.tenant_id;
     if (!tenantId) {
       return res.status(400).json({
@@ -74,26 +74,35 @@ exports.createPayment = async (req, res) => {
 
     const orderId = `SCRUM-${Date.now()}`;
 
+    // 🔧 ANTISIPASI BUG: Deteksi penempatan nama & email yang terbalik di session JWT
+    const sessionName = req.user.name || "User";
+    const sessionEmail = req.user.email || "user@scrumapps.local";
+    
+    // Regex sederhana untuk memeriksa format email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    let finalEmail = sessionEmail;
+    let finalFirstName = sessionName;
+
+    // Jika properti 'name' berformat email sedangkan properti 'email' salah, kita tukar posisinya
+    if (emailRegex.test(sessionName) && !emailRegex.test(sessionEmail)) {
+      finalEmail = sessionName;
+      finalFirstName = sessionEmail;
+    }
+
     const parameter = {
       transaction_details: {
         order_id: orderId,
         gross_amount: amount,
       },
       customer_details: {
-        first_name: req.user.name || "User",
-        email: req.user.email || "user@scrumapps.local",
+        first_name: finalFirstName,
+        email: finalEmail, // 🚀 Sekarang dijamin mengirimkan string berformat email valid ke Midtrans
       },
     };
 
     const transaction = await snap.createTransaction(parameter);
 
-    // ⚠️ CATATAN SCHEMA: kolom tenant_id & billing_cycle di tbr_payments dipakai oleh
-    // handleMidtransWebhook untuk tahu tenant mana & durasi apa yang harus diaktifkan.
-    // Kalau tabel tbr_payments belum punya kolom ini, jalankan dulu:
-    //   ALTER TABLE tbr_payments ADD COLUMN tenant_id INT NULL;
-    //   ALTER TABLE tbr_payments ADD COLUMN billing_cycle VARCHAR(20) NULL;
-    // package_type di sini diasumsikan harus sama persis dengan nilai yang dipakai
-    // tbr_tenants.package_type (mis. "PRO"). Sesuaikan plan.name / plan.type kalau berbeda.
     await db.query(
       `
       INSERT INTO tbr_payments 
@@ -683,6 +692,57 @@ exports.getPlans = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Gagal mengambil data paket dari database",
+      error: error.message
+    });
+  }
+};
+
+// ======================================================
+// NEW: GET CURRENT BILLING / SUBSCRIPTION STATUS
+// ======================================================
+exports.getBillingStatus = async (req, res) => {
+  try {
+    if (!req.user || !req.user.tenant_id) {
+      return res.status(401).json({
+        success: false,
+        message: "User tidak terautentikasi atau Tenant ID tidak ditemukan.",
+      });
+    }
+
+    const tenantId = req.user.tenant_id;
+
+    // Ambil data langganan langsung dari sumber kebenaran utama (tbr_tenants)
+    const [tenants] = await db.query(
+      `SELECT package_type, billing_cycle, subscription_status, subscription_ends_at, is_trial 
+       FROM tbr_tenants WHERE id = ?`,
+      [tenantId]
+    );
+
+    if (!tenants || tenants.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Data workspace/tenant tidak ditemukan.",
+      });
+    }
+
+    const tenant = tenants[0];
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        packageType: tenant.package_type || "FREE",
+        billingCycle: tenant.billing_cycle || "MONTHLY",
+        status: tenant.subscription_status || "active",
+        endsAt: tenant.subscription_ends_at,
+        isTrial: tenant.is_trial === 1 || tenant.is_trial === true
+      }
+    });
+
+  } catch (error) {
+    console.error("GET BILLING STATUS ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Gagal mengambil status langganan",
       error: error.message
     });
   }

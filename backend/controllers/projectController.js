@@ -64,11 +64,11 @@ exports.createProject = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
         if (!tenantId || tenantId == 0) {
-            return res.status(400).json({ message: "Bad Request: Organisasi / Tenant ID tidak teridentifikasi." });
+            return res.status(400).json({ success: false, message: "Bad Request: Organisasi / Tenant ID tidak teridentifikasi." });
         }
 
         if (userRole === 'superadmin' || userRole === 'businessanalyst' || userRole === 'teamdeveloper') {
-            return res.status(403).json({ message: "Akses Ditolak: Peran Anda tidak memiliki hak akses untuk membuat proyek baru." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Peran Anda tidak memiliki hak akses untuk membuat proyek baru." });
         }
 
         const sql = `
@@ -91,9 +91,11 @@ exports.createProject = async (req, res) => {
 
         const [result] = await db.query(sql, values);
 
+        // 🔧 FIX UTAMA: Menyesuaikan dengan kolom role_in_project & menambahkan timestamp created_at
+        const projectRole = userRole === 'admin' ? 'ProjectOwner' : req.user.role;
         await db.query(
-            `INSERT INTO tbr_project_members (project_id, user_id, role_in_project) VALUES (?, ?, ?)`,
-            [result.insertId, userId, userRole === 'admin' ? 'ProjectOwner' : req.user.role]
+            `INSERT INTO tbr_project_members (project_id, user_id, role_in_project, created_at) VALUES (?, ?, ?, NOW())`,
+            [result.insertId, userId, projectRole]
         );
 
         await createLog(userId, result.insertId, `Membuat proyek baru: "${req.body.name}"`);
@@ -113,7 +115,7 @@ exports.createProject = async (req, res) => {
 
         return res.status(201).json({ success: true, message: "Proyek berhasil dibuat", id: result.insertId });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -151,7 +153,7 @@ exports.getProjects = async (req, res) => {
         const [rows] = await db.query(sql, params);
         return res.json(rows);
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -187,7 +189,7 @@ exports.getProjectById = async (req, res) => {
 
         const [rows] = await db.query(sql, params);
         if (rows.length === 0) {
-            return res.status(404).json({ message: "Project tidak ditemukan atau akses dilarang." });
+            return res.status(404).json({ success: false, message: "Project tidak ditemukan atau akses dilarang." });
         }
         
         if (userRole !== 'superadmin') {
@@ -196,7 +198,7 @@ exports.getProjectById = async (req, res) => {
         
         return res.json(rows[0]);
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -209,12 +211,12 @@ exports.updateProject = async (req, res) => {
         const { name, start_date, end_date, status, repo_url } = req.body;
 
         if (userRole === 'superadmin') {
-            return res.status(403).json({ message: "Akses Ditolak: Superadmin hanya diizinkan memantau data secara Read-Only." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Superadmin hanya diizinkan memantau data secara Read-Only." });
         }
 
         const [projectCheck] = await db.query(`SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
         if (projectCheck.length === 0) {
-            return res.status(403).json({ message: "Akses Ditolak: Data tidak valid." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Data tidak valid." });
         }
 
         const sql = `
@@ -229,7 +231,7 @@ exports.updateProject = async (req, res) => {
         
         return res.json({ success: true, message: "Proyek berhasil diperbarui" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -241,12 +243,12 @@ exports.deleteProject = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
         if (userRole !== 'admin') {
-            return res.status(403).json({ message: "Hanya Admin Workspace (Pemilik Organisasi) yang dapat menghapus proyek ini secara permanen." });
+            return res.status(403).json({ success: false, message: "Hanya Admin Workspace (Pemilik Organisasi) yang dapat menghapus proyek ini secara permanen." });
         }
 
         const [projectInfo] = await db.query(`SELECT name FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
         if (projectInfo.length === 0) {
-            return res.status(404).json({ message: "Proyek tidak ditemukan." });
+            return res.status(404).json({ success: false, message: "Proyek tidak ditemukan." });
         }
 
         // RF-13.2: Notifikasi ke semua Product Owner SEBELUM proyek benar-benar dihapus
@@ -274,7 +276,7 @@ exports.deleteProject = async (req, res) => {
 
         return res.json({ success: true, message: "Proyek berhasil dihapus secara permanen" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -298,7 +300,7 @@ exports.getProjectDevelopments = async (req, res) => {
         
         return res.json(rows);
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -311,12 +313,12 @@ exports.createDevelopment = async (req, res) => {
         const { title, description, status, link } = req.body;
         
         if (userRole === 'superadmin') {
-            return res.status(403).json({ message: "Akses Ditolak: Mode Read-Only untuk Superadmin." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Mode Read-Only untuk Superadmin." });
         }
 
         const [projectCheck] = await db.query(`SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
         if (projectCheck.length === 0) {
-            return res.status(403).json({ message: "Modifikasi ilegal di luar tenant dilarang." });
+            return res.status(403).json({ success: false, message: "Modifikasi ilegal di luar tenant dilarang." });
         }
 
         const sql = `
@@ -328,7 +330,7 @@ exports.createDevelopment = async (req, res) => {
         await createLog(userId, projectId, `Menambahkan tugas pembangunan (Kanban Card) baru: "${title}"`);
         return res.status(201).json({ success: true, message: "Tugas Kanban berhasil ditambahkan" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -341,7 +343,7 @@ exports.updateDevelopmentStatus = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
         if (userRole === 'superadmin') {
-            return res.status(403).json({ message: "Akses Ditolak: Mode Read-Only untuk Superadmin." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Mode Read-Only untuk Superadmin." });
         }
 
         const [devInfo] = await db.query(`
@@ -351,7 +353,7 @@ exports.updateDevelopmentStatus = async (req, res) => {
         `, [devId, tenantId]);
 
         if (devInfo.length === 0) {
-            return res.status(403).json({ message: "Data tidak ditemukan atau berada di luar lingkup organisasi Anda." });
+            return res.status(403).json({ success: false, message: "Data tidak ditemukan atau berada di luar lingkup organisasi Anda." });
         }
 
         await db.query(`UPDATE tbr_developments SET status = ?, updated_at = NOW() WHERE id = ?`, [status, devId]);
@@ -359,7 +361,7 @@ exports.updateDevelopmentStatus = async (req, res) => {
 
         return res.json({ success: true, message: "Status tugas berhasil disinkronkan" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -371,7 +373,7 @@ exports.deleteDevelopment = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
         if (userRole === 'superadmin') {
-            return res.status(403).json({ message: "Akses Ditolak: Mode Read-Only." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Mode Read-Only." });
         }
 
         const [devInfo] = await db.query(`
@@ -381,7 +383,7 @@ exports.deleteDevelopment = async (req, res) => {
         `, [devId, tenantId]);
 
         if (devInfo.length === 0) {
-            return res.status(403).json({ message: "Data tidak ditemukan." });
+            return res.status(403).json({ success: false, message: "Data tidak ditemukan." });
         }
 
         await db.query(`DELETE FROM tbr_developments WHERE id = ?`, [devId]);
@@ -389,7 +391,7 @@ exports.deleteDevelopment = async (req, res) => {
 
         return res.json({ success: true, message: "Tugas berhasil dihapus" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -413,7 +415,7 @@ exports.getProjectSprints = async (req, res) => {
         
         return res.json(rows);
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -426,12 +428,12 @@ exports.createSprint = async (req, res) => {
         const { name, description, start_date, end_date, status } = req.body;
         
         if (userRole === 'superadmin' || userRole === 'teamdeveloper') {
-            return res.status(403).json({ message: "Akses Ditolak: Penentuan Sprint dilakukan manual oleh PO atau BA." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Penentuan Sprint dilakukan manual oleh PO atau BA." });
         }
 
         const [projectCheck] = await db.query(`SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
         if (projectCheck.length === 0) {
-            return res.status(403).json({ message: "Akses Terlarang." });
+            return res.status(403).json({ success: false, message: "Akses Terlarang." });
         }
 
         await db.query(`
@@ -442,7 +444,7 @@ exports.createSprint = async (req, res) => {
         await createLog(userId, projectId, `Membuat Sprint baru secara manual: "${name}"`);
         return res.status(201).json({ success: true, message: "Sprint manual berhasil dijadwalkan" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -456,7 +458,7 @@ exports.updateSprint = async (req, res) => {
         const { name, description, start_date, end_date, status } = req.body;
 
         if (userRole === 'superadmin' || userRole === 'teamdeveloper') {
-            return res.status(403).json({ message: "Akses Ditolak: Manajemen sprint hanya untuk PO dan BA." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Manajemen sprint hanya untuk PO dan BA." });
         }
 
         const [sprintCheck] = await db.query(`
@@ -466,7 +468,7 @@ exports.updateSprint = async (req, res) => {
         `, [sprintId, tenantId]);
 
         if (sprintCheck.length === 0) {
-            return res.status(403).json({ message: "Sprint tidak valid atau berada di luar lingkup organisasi Anda." });
+            return res.status(403).json({ success: false, message: "Sprint tidak valid atau berada di luar lingkup organisasi Anda." });
         }
 
         const sql = `
@@ -481,7 +483,7 @@ exports.updateSprint = async (req, res) => {
 
         return res.json({ success: true, message: "Sprint berhasil diperbarui" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -493,7 +495,7 @@ exports.deleteSprint = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
         if (userRole === 'superadmin') {
-            return res.status(403).json({ message: "Akses Ditolak." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak." });
         }
 
         const [sprintInfo] = await db.query(`
@@ -503,7 +505,7 @@ exports.deleteSprint = async (req, res) => {
         `, [sprintId, tenantId]);
 
         if (sprintInfo.length === 0) {
-            return res.status(404).json({ message: "Sprint tidak ditemukan." });
+            return res.status(404).json({ success: false, message: "Sprint tidak ditemukan." });
         }
 
         await db.query(`DELETE FROM tbr_sprints WHERE id = ?`, [sprintId]);
@@ -511,7 +513,7 @@ exports.deleteSprint = async (req, res) => {
 
         return res.json({ success: true, message: "Sprint berhasil dihapus" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -535,7 +537,7 @@ exports.getProjectBacklogs = async (req, res) => {
 
         return res.json(rows);
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -548,12 +550,12 @@ exports.createBacklog = async (req, res) => {
         const { name, description, priority, applicant, status, sprint_id } = req.body;
 
         if (userRole === 'superadmin' || userRole === 'teamdeveloper') {
-            return res.status(403).json({ message: "Akses Ditolak: Penulisan User Story dijabarkan manual oleh BA atau PO." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Penulisan User Story dijabarkan manual oleh BA atau PO." });
         }
 
         const [projectCheck] = await db.query(`SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
         if (projectCheck.length === 0) {
-            return res.status(403).json({ message: "Proyek tidak valid dalam lingkup organisasi Anda." });
+            return res.status(403).json({ success: false, message: "Proyek tidak valid dalam lingkup organisasi Anda." });
         }
         
         const sql = `
@@ -565,7 +567,7 @@ exports.createBacklog = async (req, res) => {
         await createLog(userId, projectId, `Menambahkan item Product Backlog manual: "${name}"`);
         return res.status(201).json({ success: true, message: "User story backlog berhasil dibuat" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -577,7 +579,7 @@ exports.updateBacklog = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
         const { name, description, priority, applicant, status, sprint_id } = req.body;
         
-        if (userRole === 'superadmin') return res.status(403).json({ message: "Mode Read-Only." });
+        if (userRole === 'superadmin') return res.status(403).json({ success: false, message: "Mode Read-Only." });
 
         const [backlogInfo] = await db.query(`
             SELECT b.project_id FROM tbr_backlogs b 
@@ -585,7 +587,7 @@ exports.updateBacklog = async (req, res) => {
             WHERE b.id = ? AND p.tenant_id = ?
         `, [backlogId, tenantId]);
 
-        if (backlogInfo.length === 0) return res.status(403).json({ message: "Akses Ilegal." });
+        if (backlogInfo.length === 0) return res.status(403).json({ success: false, message: "Akses Ilegal." });
         
         await db.query(`
             UPDATE tbr_backlogs 
@@ -596,7 +598,7 @@ exports.updateBacklog = async (req, res) => {
         await createLog(userId, backlogInfo[0].project_id, `Memperbarui detail User Story Backlog: "${name}"`);
         return res.json({ success: true, message: "Backlog updated" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -607,7 +609,7 @@ exports.deleteBacklog = async (req, res) => {
         const userRole = req.user.role ? String(req.user.role).toLowerCase() : '';
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
-        if (userRole === 'superadmin') return res.status(403).json({ message: "Mode Read-Only." });
+        if (userRole === 'superadmin') return res.status(403).json({ success: false, message: "Mode Read-Only." });
 
         const [backlogInfo] = await db.query(`
             SELECT b.name, b.project_id FROM tbr_backlogs b 
@@ -615,14 +617,14 @@ exports.deleteBacklog = async (req, res) => {
             WHERE b.id = ? AND p.tenant_id = ?
         `, [backlogId, tenantId]);
 
-        if (backlogInfo.length === 0) return res.status(404).json({ message: "Backlog tidak ditemukan." });
+        if (backlogInfo.length === 0) return res.status(404).json({ success: false, message: "Backlog tidak ditemukan." });
 
         await db.query(`DELETE FROM tbr_backlogs WHERE id = ?`, [backlogId]);
         await createLog(userId, backlogInfo[0].project_id, `Menghapus item Product Backlog: "${backlogInfo[0].name}"`);
 
         return res.json({ success: true, message: "Backlog berhasil dihapus" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -646,7 +648,7 @@ exports.getProjectVisions = async (req, res) => {
 
         return res.json(rows);
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -659,11 +661,11 @@ exports.createVision = async (req, res) => {
         const { name, vision, target_group, needs, products, business_goals, competitors } = req.body;
         
         if (!['projectowner', 'admin', 'businessanalyst'].includes(userRole)) {
-            return res.status(403).json({ message: "Akses Ditolak: Penyusunan visi awal proyek adalah tanggung jawab Project Owner atau Business Analyst." });
+            return res.status(403).json({ success: false, message: "Akses Ditolak: Penyusunan visi awal proyek adalah tanggung jawab Project Owner atau Business Analyst." });
         }
 
         const [projectCheck] = await db.query(`SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
-        if (projectCheck.length === 0) return res.status(403).json({ message: "Proyek tidak valid." });
+        if (projectCheck.length === 0) return res.status(403).json({ success: false, message: "Proyek tidak valid." });
 
         const sql = `
             INSERT INTO tbr_vision_boards (name, vision, target_group, needs, products, business_goals, competitors, project_id, created_at, updated_at) 
@@ -674,7 +676,7 @@ exports.createVision = async (req, res) => {
         await createLog(userId, projectId, `Menyusun Vision Board manual baru: "${name}"`);
         return res.status(201).json({ success: true, message: "Vision Board berhasil disimpan" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -686,7 +688,7 @@ exports.updateVision = async (req, res) => {
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
         const { name, vision, target_group, needs, products, business_goals, competitors } = req.body;
         
-        if (userRole === 'superadmin') return res.status(403).json({ message: "Mode Read-Only." });
+        if (userRole === 'superadmin') return res.status(403).json({ success: false, message: "Mode Read-Only." });
 
         const [visionInfo] = await db.query(`
             SELECT v.project_id FROM tbr_vision_boards v 
@@ -694,7 +696,7 @@ exports.updateVision = async (req, res) => {
             WHERE v.id = ? AND p.tenant_id = ?
         `, [visionId, tenantId]);
 
-        if (visionInfo.length === 0) return res.status(403).json({ message: "Akses Ditolak." });
+        if (visionInfo.length === 0) return res.status(403).json({ success: false, message: "Akses Ditolak." });
         
         const sql = `
             UPDATE tbr_vision_boards 
@@ -706,7 +708,7 @@ exports.updateVision = async (req, res) => {
         await createLog(userId, visionInfo[0].project_id, `Mengubah komponen data pada Vision Board: "${name}"`);
         return res.json({ success: true, message: "Vision Board berhasil diperbarui" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -717,7 +719,7 @@ exports.deleteVision = async (req, res) => {
         const userRole = req.user.role ? String(req.user.role).toLowerCase() : '';
         const tenantId = req.user.tenant_id || req.headers['x-tenant-id'];
 
-        if (userRole === 'superadmin') return res.status(403).json({ message: "Mode Read-Only." });
+        if (userRole === 'superadmin') return res.status(403).json({ success: false, message: "Mode Read-Only." });
 
         const [visionInfo] = await db.query(`
             SELECT v.name, v.project_id FROM tbr_vision_boards v 
@@ -725,14 +727,14 @@ exports.deleteVision = async (req, res) => {
             WHERE v.id = ? AND p.tenant_id = ?
         `, [visionId, tenantId]);
 
-        if (visionInfo.length === 0) return res.status(404).json({ message: "Vision Board tidak ditemukan." });
+        if (visionInfo.length === 0) return res.status(404).json({ success: false, message: "Vision Board tidak ditemukan." });
 
         await db.query(`DELETE FROM tbr_vision_boards WHERE id = ?`, [visionId]);
         await createLog(userId, visionInfo[0].project_id, `Menghapus komponen Vision Board: "${visionInfo[0].name}"`);
 
         return res.json({ success: true, message: "Vision Board deleted" });
     } catch (err) { 
-        return res.status(500).json({ error: err.message }); 
+        return res.status(500).json({ success: false, error: err.message }); 
     }
 };
 
@@ -759,10 +761,9 @@ exports.getProjectLogs = async (req, res) => {
         return res.json(rows);
     } catch (err) {
         console.error("DATABASE ERROR:", err.message);
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ success: false, error: err.message });
     }
 };
-
 /**
  * =========================================================================
  * 7. PROJECT STATISTICS (MONITORING ACUAN DASHBOARD GLOBAL)
@@ -791,7 +792,7 @@ exports.getProjectStats = async (req, res) => {
             }
         });
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ success: false, error: err.message });
     }
 };
 
@@ -816,10 +817,11 @@ exports.getWorkspaceScrumStats = async (req, res) => {
                 IFNULL(SUM(CASE WHEN b.status = 'done' THEN 1 ELSE 0 END), 0) as done,
                 IFNULL(SUM(CASE WHEN b.status IN ('late', 'overdue') THEN 1 ELSE 0 END), 0) as late
             FROM tbr_projects p
-            LEFT JOIN tbr_backlogs b ON p.id = b.project_id
+            INNER JOIN tbr_backlogs b ON p.id = b.project_id
             WHERE p.tenant_id = ?
         `, [tenantId]);
 
+        // Jika tidak ada backlog, pastikan nilai default-nya nol agar chart tidak rusak
         const stats = statusRows[0] || { total_backlogs: 0, hold: 0, progress: 0, done: 0, late: 0 };
 
         const [sprintRows] = await db.query(`
@@ -843,6 +845,6 @@ exports.getWorkspaceScrumStats = async (req, res) => {
         });
     } catch (err) {
         console.error("DEBUG ERROR SCRUM STATS:", err.message);
-        return res.status(500).json({ error: "Terjadi kesalahan server saat mengambil statistik." });
+        return res.status(500).json({ success: false, error: "Terjadi kesalahan server saat mengambil statistik." });
     }
 };

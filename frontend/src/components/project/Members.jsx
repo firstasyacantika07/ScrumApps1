@@ -37,14 +37,18 @@ const Members = ({ projectId }) => {
 
   /* =====================================================
       FETCH DATA
-  ===================================================== */
+   ===================================================== */
   const fetchMembers = async () => {
     try {
       setLoading(true);
       const res = await api.get(`/projects/${projectId}/members`);
-      setMembers(res.data);
+      
+      // Amankan jika API membungkus data di dalam objek `.data` atau langsung Array
+      const memberData = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      setMembers(memberData);
     } catch (err) {
       console.error('GET MEMBERS ERROR:', err.response?.data || err.message);
+      setMembers([]); // Fallback ke array kosong jika error
     } finally {
       setLoading(false);
     }
@@ -53,9 +57,13 @@ const Members = ({ projectId }) => {
   const fetchUsers = async () => {
     try {
       const res = await api.get('/users');
-      setUsers(res.data);
+      
+      // Amankan penentuan Array: cek res.data langsung atau res.data.data
+      const userData = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+      setUsers(userData);
     } catch (err) {
       console.error('GET USERS ERROR:', err.response?.data || err.message);
+      setUsers([]); // Fallback ke array kosong jika error
     }
   };
 
@@ -66,11 +74,16 @@ const Members = ({ projectId }) => {
 
   /* =====================================================
       FILTER USERS (Mencegah Duplikasi Anggota)
-  ===================================================== */
+   ===================================================== */
   // Hanya tampilkan user yang belum menjadi member di project ini
   const availableUsers = useMemo(() => {
-    return users.filter(user => !members.some(member => member.user_id === user.id));
+    // Defense programming: pastikan users dan members valid berbentuk Array sebelum diproses
+    if (!Array.isArray(users)) return [];
+    const safeMembers = Array.isArray(members) ? members : [];
+
+    return users.filter(user => !safeMembers.some(member => member.user_id === user.id));
   }, [users, members]);
+
 
   /* =====================================================
       RESET FORM

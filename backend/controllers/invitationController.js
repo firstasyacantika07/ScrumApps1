@@ -3,6 +3,7 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto'); 
 const bcrypt = require("bcryptjs"); 
 const db = require("../config/db"); 
+const jwt = require("jsonwebtoken");
 
 // =========================================================================
 // 🚀 BYPASS AUTENTIKASI: Kredensial Langsung Sesuai File .env Anda
@@ -154,10 +155,8 @@ exports.verifyInvitation = async (req, res) => {
   }
 };
 
-const jwt = require("jsonwebtoken");
-
 // ======================================================
-// 👤 3. ACCEPT INVITATION (Registrasi Anggota Tim & Update State)
+// 👤 3. ACCEPT INVITATION (Registrasi Anggota Tim & Auto-Join Project)
 // ======================================================
 exports.acceptInvitation = async (req, res) => {
   const connection = await db.getConnection();
@@ -168,7 +167,6 @@ exports.acceptInvitation = async (req, res) => {
       return res.status(400).json({ success: false, message: "Seluruh data profil wajib diisi." });
     }
 
-    // 🔧 FIX: Trim password (jaga-jaga ada spasi tak sengaja dari input form)
     const cleanPassword = password.trim();
 
     const [invitations] = await connection.query('SELECT * FROM tbr_invitations WHERE token = ?', [token]);
@@ -186,24 +184,42 @@ exports.acceptInvitation = async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(cleanPassword, salt);
-
-    // 🔧 FIX: Normalisasi ulang email dari data invitation (jaga-jaga data lama belum trim/lowercase)
     const cleanEmail = invitation.email.trim().toLowerCase();
 
+    // A. Daftarkan User ke tabel tbr_users
     const [insertResult] = await connection.query(
       `INSERT INTO tbr_users (name, email, password, role, tenant_id) VALUES (?, ?, ?, ?, ?)`,
       [name, cleanEmail, hashedPassword, invitation.role, invitation.tenant_id]
     );
 
+    const newUserId = insertResult.insertId;
+
+    // 🔥 SINKRONISASI BARU: Otomatis daftarkan user baru ke project yang ada di tenant ini
+    // (Bypass perlindungan agar saat pertama login dashboard tidak kosong melongpong)
+    const [activeProjects] = await connection.query(
+      `SELECT id FROM tbr_projects WHERE tenant_id = ?`, 
+      [invitation.tenant_id]
+    );
+
+    if (activeProjects.length > 0) {
+      // Susun query mass-insert ke tbr_project_members
+      const memberInsertValues = activeProjects.map(proj => [proj.id, newUserId, invitation.role]);
+      
+      await connection.query(
+        `INSERT INTO tbr_project_members (project_id, user_id, role) VALUES ?`,
+        [memberInsertValues]
+      );
+    }
+
+    // B. Update status undangan menjadi accepted
     await connection.query('UPDATE tbr_invitations SET status = "accepted" WHERE id = ?', [invitation.id]);
 
     await connection.commit();
 
-    // 🔧 FIX: Generate token JWT supaya frontend bisa langsung auto-login
-    // dan diarahkan sesuai role (lewat AllowedRolesRoute di App.jsx)
+    // C. Generate token JWT supaya frontend bisa langsung auto-login
     const jwtToken = jwt.sign(
       {
-        id: insertResult.insertId,
+        id: newUserId,
         role: invitation.role,
         tenant_id: invitation.tenant_id,
       },
@@ -213,10 +229,10 @@ exports.acceptInvitation = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: "Berhasil bergabung! Akun tim Anda telah aktif.",
+      message: "Berhasil bergabung! Akun tim Anda telah aktif dan disinkronkan ke proyek.",
       token: jwtToken,
       user: {
-        id: insertResult.insertId,
+        id: newUserId,
         name,
         email: cleanEmail,
         role: invitation.role,

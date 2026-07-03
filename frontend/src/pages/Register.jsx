@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { EyeOff, Eye } from 'lucide-react';
+import { EyeOff, Eye, Building2 } from 'lucide-react';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
 
 const Register = () => {
   const [formData, setFormData] = useState({ 
     name: '', 
+    company_name: '', // 👈 Menambahkan field company_name untuk tabel tbr_tenants
     email: '', 
     password: ''
   });
@@ -23,12 +24,12 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+    setError('');
     try {
-      // 🔧 FIX: Pakai instance `api` (sudah ada baseURL sesuai .env / ngrok), bukan hardcode localhost
+      // Mengirimkan data registrasi lengkap (termasuk company_name) ke backend
       const response = await api.post('/auth/register', formData);
 
-      // 🔧 FIX: Auto-login setelah register sukses, redirect ke dashboard
-      // (akses menu otomatis dibatasi sesuai role lewat AllowedRolesRoute di App.jsx)
+      // Auto-login setelah register sukses, redirect ke dashboard
       if (response.data?.token) {
         login(response.data.token, response.data.user);
         navigate('/dashboard');
@@ -72,12 +73,36 @@ const Register = () => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Input Nama Lengkap */}
             <input 
-              name="name" placeholder="Nama Lengkap" onChange={handleChange} required 
+              name="name" 
+              placeholder="Nama Lengkap" 
+              onChange={handleChange} 
+              required 
               className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#D31217] outline-none transition-all" 
             />
+
+            {/* 🆕 Input Nama Perusahaan / Workspace */}
+            <div className="relative">
+              <input 
+                name="company_name" 
+                placeholder="Nama Perusahaan / Organisasi" 
+                onChange={handleChange} 
+                required 
+                className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#D31217] outline-none transition-all pr-12" 
+              />
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">
+                <Building2 size={20} />
+              </div>
+            </div>
+
+            {/* Input Email */}
             <input 
-              name="email" type="email" placeholder="Email" onChange={handleChange} required 
+              name="email" 
+              type="email" 
+              placeholder="Email" 
+              onChange={handleChange} 
+              required 
               className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#D31217] outline-none transition-all" 
             />
             
@@ -106,8 +131,9 @@ const Register = () => {
             </p>
 
             <button 
-              type="submit" disabled={isLoading} 
-              className="w-full py-4 bg-[#D31217] text-white rounded-2xl font-bold text-lg hover:bg-red-700 transition-all active:scale-95 shadow-lg shadow-red-100"
+              type="submit" 
+              disabled={isLoading} 
+              className="w-full py-4 bg-[#D31217] text-white rounded-2xl font-bold text-lg hover:bg-red-700 transition-all active:scale-95 shadow-lg shadow-red-100 disabled:opacity-50"
             >
               {isLoading ? "Memproses..." : "Daftar Sekarang"}
             </button>

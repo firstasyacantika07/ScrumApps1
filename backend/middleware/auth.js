@@ -13,6 +13,7 @@ const verifyToken = async (req, res, next) => {
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
+        success: false,
         message: "Token diperlukan",
       });
     }
@@ -22,6 +23,7 @@ const verifyToken = async (req, res, next) => {
 
     if (!token || token === "null" || token === "undefined") {
       return res.status(401).json({
+        success: false,
         message: "Token diperlukan",
       });
     }
@@ -51,6 +53,7 @@ const verifyToken = async (req, res, next) => {
 
     if (rows.length === 0) {
       return res.status(401).json({
+        success: false,
         message: "User tidak ditemukan",
       });
     }
@@ -60,6 +63,7 @@ const verifyToken = async (req, res, next) => {
     // 5. Proteksi Tambahan: Jika perusahaan/tenant dibekukan oleh admin utama pusat
     if (user.tenant_status === 'suspended') {
       return res.status(403).json({
+        success: false,
         message: "Akses Perusahaan Ditangguhkan: Silakan hubungi bagian administrasi billing.",
       });
     }
@@ -95,12 +99,7 @@ const verifyToken = async (req, res, next) => {
       );
     }
 
-    // ✨ REVISI SINKRONISASI: Standardisasi string role (lowercase, tanpa spasi)
-    // Ini krusial agar konsisten di frontend dan backend controller lainnya.
-    // 🔥 FIX: Normalisasi role — hapus spasi & underscore, lowercase
-    // Contoh: "Business Analyst" → "businessanalyst"
-    //         "business_analyst" → "businessanalyst"  
-    //         "TeamDeveloper"    → "teamdeveloper"
+    // 🔥 FIX UTAMA: Normalisasi role diseragamkan menggunakan regex /[\s_]+/g
     const cleanRole = user.role 
         ? String(user.role).replace(/[\s_]+/g, '').toLowerCase().trim() 
         : '';
@@ -110,7 +109,7 @@ const verifyToken = async (req, res, next) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: cleanRole, // 🔥 Menggunakan role yang sudah bersih & terstandar
+      role: cleanRole, 
       tenant_id: user.tenant_id,
       package_type: user.package_type || 'FREE',
       subscription_status: finalStatus,
@@ -120,17 +119,19 @@ const verifyToken = async (req, res, next) => {
       billing_cycle: user.billing_cycle || 'NONE'
     };
 
-    next();
+    return next(); // Pastikan return next() dipanggil dengan tegas
   } catch (err) {
     console.error("🔥 VERIFY TOKEN ERROR:", err.message);
 
     if (err.name === "TokenExpiredError") {
       return res.status(401).json({
+        success: false,
         message: "Token kedaluwarsa, silakan login kembali",
       });
     }
 
     return res.status(401).json({
+      success: false,
       message: "Token tidak valid",
     });
   }
@@ -144,18 +145,19 @@ const verifyToken = async (req, res, next) => {
 const authorize = (roles = [], options = {}) => {
   if (typeof roles === "string") roles = [roles];
   
+  // 🔥 FIX: Gunakan regex /[\s_]+/g yang sama dengan verifyToken
   const forbiddenRoles = options.forbiddenRoles || [];
-  const strictForbidden = forbiddenRoles.map(r => r.replace(/\s+/g, '').toLowerCase().trim());
+  const strictForbidden = forbiddenRoles.map(r => r.replace(/[\s_]+/g, '').toLowerCase().trim());
 
   return (req, res, next) => {
-    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+    if (!req.user) return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    // Karena req.user.role di atas sudah di-clean, kita langsung pakai
     const userRole = req.user.role; 
-    const allowedRoles = roles.map(r => r.replace(/\s+/g, '').toLowerCase().trim());
+    const allowedRoles = roles.map(r => r.replace(/[\s_]+/g, '').toLowerCase().trim());
 
     if (strictForbidden.includes(userRole)) {
       return res.status(403).json({ 
+        success: false,
         message: "Forbidden: Role Anda sengaja dibatasi untuk aksi ini." 
       });
     }
@@ -164,10 +166,13 @@ const authorize = (roles = [], options = {}) => {
     if (userRole === "superadmin") return next();
 
     if (roles.length && !allowedRoles.includes(userRole)) {
-      return res.status(403).json({ message: "Forbidden: Anda tidak memiliki hak akses untuk menu ini." });
+      return res.status(403).json({ 
+        success: false, 
+        message: "Forbidden: Anda tidak memiliki hak akses untuk menu ini." 
+      });
     }
 
-    next();
+    return next();
   };
 };
 
