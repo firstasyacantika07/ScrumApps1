@@ -11,6 +11,13 @@ const notificationModel = require('../models/notificationModel');
 // =============================================
 router.get('/', verifyToken, async (req, res) => {
   try {
+    // 🔧 FIX: endpoint ini di-poll tiap 30 detik oleh NotificationBell.jsx.
+    // Tanpa header ini, Express (ETag default aktif) bisa membalas 304 Not
+    // Modified dan browser diam-diam memakai body dari cache lokal yang lama,
+    // sehingga notifikasi baru terlihat "tidak muncul" walau sudah tersimpan
+    // di DB. Data notifikasi bersifat dinamis, jadi jangan pernah di-cache.
+    res.set('Cache-Control', 'no-store');
+
     const userId = req.user.id;
     const rows = await notificationModel.getByUser(userId, { limit: 100 });
 

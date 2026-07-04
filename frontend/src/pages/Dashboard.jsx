@@ -4,7 +4,8 @@ import {
   FolderOpen, RefreshCcw, CheckCircle2, 
   AlertCircle, ShieldAlert, ChevronRight, 
   Activity, ArrowRight, Clock, Package,
-  Users, Layers, CreditCard, Building, Plus, GitBranch, Play
+  Users, Layers, CreditCard, Building, Plus, GitBranch, Play,
+  Briefcase
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import api from '../api/axios';
@@ -368,7 +369,8 @@ const ProjectOwnerView = ({ scrumStats, recentProjects, navigate }) => {
           <h4 className="text-xs font-black text-amber-800 uppercase">Mode Pemantauan Aktif (Read-Only)</h4>
           <p className="text-[11px] font-bold text-amber-600 mt-1">Anda memiliki hak akses penuh untuk meninjau diagram metrik tim, struktur backlog, serta visualisasi Kanban.</p>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <StatCardModern label="Jumlah Project" value={recentProjects.length} icon={<Briefcase />} color="#6366f1" />
           <StatCardModern label="Total Backlog" value={scrumStats.total_backlogs} icon={<Package />} color="#ee1e2d" />
           <StatCardModern label="In Progress" value={scrumStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
           <StatCardModern label="Selesai" value={scrumStats.done} icon={<CheckCircle2 />} color="#22c55e" />
@@ -416,7 +418,8 @@ const ProjectOwnerView = ({ scrumStats, recentProjects, navigate }) => {
 const BusinessAnalystView = ({ scrumStats, recentProjects, navigate }) => {
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+        <StatCardModern label="Jumlah Project" value={recentProjects.length} icon={<Briefcase />} color="#6366f1" />
         <StatCardModern label="Backlog Baru" value={scrumStats.hold} icon={<FolderOpen />} color="#3b82f6" />
         <StatCardModern label="Dikerjakan Dev" value={scrumStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
         <StatCardModern label="Selesai Ditinjau" value={scrumStats.done} icon={<CheckCircle2 />} color="#22c55e" />
@@ -504,9 +507,18 @@ const DeveloperView = ({ scrumStats, recentProjects, navigate }) => {
         setLoadingPoList(true);
         const res = await api.get('/users');
         const data = res.data?.data || res.data || [];
+        // 🔧 FIX: sebelumnya cuma .replace(/_/g, '') yang hanya membuang
+        // underscore, PADAHAL role di DB kemungkinan tersimpan dengan spasi
+        // (mis. "Project Owner"), jadi hasil normalisasi masih "project owner"
+        // (dengan spasi) dan TIDAK PERNAH sama dengan target "projectowner".
+        // Akibatnya PO asli ikut gagal ke-filter/ter-lock dengan benar.
+        // Sekarang buang semua karakter non-huruf (spasi, underscore, strip,
+        // dll) sekaligus, supaya "Project Owner", "project_owner", dan
+        // "ProjectOwner" semuanya ternormalisasi jadi "projectowner".
+        const normalizeRole = (r) => String(r || '').toLowerCase().replace(/[^a-z]/g, '');
         // 🆕 Hanya tampilkan akun dengan role Product Owner di dropdown ini.
         const owners = (Array.isArray(data) ? data : []).filter(
-          (u) => String(u.role || '').toLowerCase().replace(/_/g, '') === 'projectowner'
+          (u) => normalizeRole(u.role) === 'projectowner'
         );
         if (isMounted) setPoList(owners);
       } catch (err) {
@@ -535,7 +547,8 @@ const DeveloperView = ({ scrumStats, recentProjects, navigate }) => {
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+        <StatCardModern label="Jumlah Project" value={recentProjects.length} icon={<Briefcase />} color="#6366f1" />
         <StatCardModern label="Tugas Hold" value={scrumStats.hold} icon={<FolderOpen />} color="#3b82f6" />
         <StatCardModern label="Sedang Dikerjakan" value={scrumStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
         <StatCardModern label="Selesai (Done)" value={scrumStats.done} icon={<CheckCircle2 />} color="#22c55e" />

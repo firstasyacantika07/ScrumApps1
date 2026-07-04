@@ -19,9 +19,14 @@ const db = require('../config/db');
 
 // Batas default per paket. Ganti sesuai kebijakan produk Anda,
 // atau pindahkan ke tabel database jika limit-nya dinamis.
+// 🔧 FIX: nilai sebelumnya (free: 3 project, pro: 20 project/30 anggota)
+// tidak sinkron dengan yang ditampilkan di halaman Workspace Billing
+// ("FREE PLAN: 1 Project", "PRO PLAN: 15 Project, Maksimal 20 anggota").
+// Disamakan di sini supaya kuota yang dihitung backend cocok dengan
+// yang dijanjikan ke user di halaman pricing.
 const PLAN_LIMITS = {
-    free: { project_limit: 3, team_limit: 5 },
-    pro: { project_limit: 20, team_limit: 30 },
+    free: { project_limit: 1, team_limit: 5 },
+    pro: { project_limit: 15, team_limit: 20 },
     enterprise: { project_limit: null, team_limit: null } // null = unlimited (∞)
 };
 

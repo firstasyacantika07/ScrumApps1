@@ -37,14 +37,31 @@ const notifyProjectMembers = async (projectId, projectName, status) => {
         `, [projectId]);
 
         for (const member of members) {
-            await notificationService.sendProjectStatusNotification({
-                projectId,
-                userId: member.id,
-                email: member.email,
-                userName: member.name,
-                projectName,
-                status: String(status).toLowerCase()
-            });
+            // 🔧 FIX: Sebelumnya tidak ada pengecekan email kosong/null, dan tidak ada
+            // try/catch per-member. Akibatnya kalau salah satu member gagal terkirim
+            // (mis. email null di tbr_users), exception melompat keluar dari loop dan
+            // seluruh member SISANYA (apapun role-nya) ikut tidak dapat notifikasi.
+            // Sekarang: skip member tanpa email, dan bungkus pengiriman tiap member
+            // dalam try/catch sendiri supaya kegagalan satu member tidak menghentikan
+            // pengiriman ke member lain.
+            if (!member.email) {
+                console.warn(`[NOTIF SKIP] project #${projectId}: user ${member.id} (${member.name || 'no name'}) tidak memiliki email, dilewati.`);
+                continue;
+            }
+
+            try {
+                await notificationService.sendProjectStatusNotification({
+                    projectId,
+                    userId: member.id,
+                    email: member.email,
+                    userName: member.name,
+                    projectName,
+                    status: String(status).toLowerCase()
+                });
+            } catch (notifErr) {
+                console.error(`[NOTIF FAIL] project #${projectId}, user ${member.id} (${member.email}):`, notifErr.message);
+                // Lanjut ke member berikutnya, jangan menghentikan seluruh loop.
+            }
         }
     } catch (err) {
         console.error("[PROJECT NOTIFICATION ERROR]", err.message);
@@ -249,10 +266,17 @@ exports.updateProject = async (req, res) => {
             return res.status(403).json({ success: false, message: "Akses Ditolak: Superadmin hanya diizinkan memantau data secara Read-Only." });
         }
 
-        const [projectCheck] = await db.query(`SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
+        // 🔧 FIX (notifikasi status duplikat): ambil status LAMA sebelum di-update,
+        // supaya bisa dibandingkan dengan status baru. Sebelumnya notifyProjectMembers()
+        // selalu dipanggil di setiap updateProject, jadi kalau user cuma edit nama/
+        // tanggal/repo_url pada proyek yang statusnya sudah "done"/"late", notifikasi
+        // "Status proyek: SELESAI/TERLAMBAT" ikut terkirim ulang setiap kali -- padahal
+        // statusnya tidak berubah sama sekali.
+        const [projectCheck] = await db.query(`SELECT id, status FROM tbr_projects WHERE id = ? AND tenant_id = ?`, [projectId, tenantId]);
         if (projectCheck.length === 0) {
             return res.status(403).json({ success: false, message: "Akses Ditolak: Data tidak valid." });
         }
+        const previousStatus = projectCheck[0].status;
 
         const sql = `
             UPDATE tbr_projects 
@@ -261,7 +285,11 @@ exports.updateProject = async (req, res) => {
         `;
         await db.query(sql, [name, start_date, end_date, status, repo_url || null, projectId, tenantId]);
         
-        await notifyProjectMembers(projectId, name, status);
+        // Kirim notifikasi HANYA kalau status benar-benar berubah dari sebelumnya.
+        const statusChanged = String(previousStatus).toLowerCase() !== String(status).toLowerCase();
+        if (statusChanged) {
+            await notifyProjectMembers(projectId, name, status);
+        }
         await createLog(userId, projectId, `Memperbarui detail proyek. Status: ${status}, Repo: ${repo_url ? 'Diubah' : 'Belum Ditentukan'}`);
         
         return res.json({ success: true, message: "Proyek berhasil diperbarui" });
