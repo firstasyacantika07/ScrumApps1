@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 // Ambil context autentikasi global agar data role sinkron
 import { useAuth } from '../context/AuthContext'; 
+import WorkspaceSwitcher from './WorkspaceSwitcher';
 
 const Sidebar = () => {
   const { id: projectId } = useParams(); 
@@ -102,9 +103,10 @@ const Sidebar = () => {
       {/* Brand Header */}
       <div className="p-6 border-b border-slate-800">
         <h2 className="text-xl font-black tracking-wider text-red-500 uppercase">ScrumApps</h2>
-        <p className="text-xs text-slate-400 font-bold mt-1 uppercase tracking-wide">
-          Role: {user?.role || 'Guest'}
-        </p>
+      </div>
+
+      <div className="bg-slate-800/50">
+        <WorkspaceSwitcher />
       </div>
 
       {/* List Item Navigasi */}

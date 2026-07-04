@@ -25,6 +25,21 @@ router.post("/login", (req, res, next) => {
 });
 
 /**
+ * @route   POST /api/auth/google
+ * @desc    Log in / Register with Google
+ * @access  Public
+ */
+router.post("/google", (req, res, next) => {
+  if (!authController?.googleAuth) {
+    return res.status(500).json({
+      success: false,
+      message: "Fungsi authController.googleAuth tidak ditemukan",
+    });
+  }
+  return authController.googleAuth(req, res, next);
+});
+
+/**
  * @route   GET /api/auth/me
  * @desc    Ambil data profile user yang sedang login & validasi kedaluwarsa Tenant
  * @access  Private (Memerlukan token JWT valid)

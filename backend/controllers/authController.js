@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const db = require("../config/db");
+const { OAuth2Client } = require('google-auth-library');
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Helper internal sanitasi format tanggal ISO
 const safeIsoDate = (dateString) => {
@@ -29,27 +31,9 @@ exports.login = async (req, res) => {
     // 🔧 FIX: Normalisasi email (trim + lowercase) supaya konsisten dengan data yang disimpan
     email = email ? email.trim().toLowerCase() : email;
 
-    // 1. 🔥 REVISI: Ambil data profile dari tbr_users dan gabungkan data paket dari tbr_tenants
+    // 1. 🔥 REVISI: Ambil data profile dasar
     const [rows] = await db.query(
-      `
-      SELECT
-        u.id,
-        u.name,
-        u.email,
-        u.password,
-        u.role,
-        u.tenant_id,
-        t.package_type,
-        t.billing_cycle,
-        t.status as tenant_status,
-        t.trial_start,
-        t.trial_end,
-        t.subscription_ends_at
-      FROM tbr_users u
-      LEFT JOIN tbr_tenants t ON u.tenant_id = t.id
-      WHERE u.email = ?
-      LIMIT 1
-      `,
+      `SELECT id, name, email, password, role, tenant_id FROM tbr_users WHERE email = ? LIMIT 1`,
       [email]
     );
 
@@ -78,55 +62,40 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Cek jika tenant disuspended pusat
-    if (user.tenant_status === 'suspended') {
-      return res.status(403).json({
-        success: false,
-        message: "Akses Perusahaan Ditangguhkan: Hubungi bagian administrasi billing.",
-      });
-    }
+    // 4. Ambil daftar workspace dari tabel pivot
+    const [workspaces] = await db.query(`
+      SELECT 
+        tu.tenant_id, tu.role, t.company_name, t.subdomain, t.package_type, t.billing_cycle, t.status as tenant_status, t.trial_end, t.subscription_ends_at
+      FROM tbr_tenant_users tu
+      JOIN tbr_tenants t ON tu.tenant_id = t.id
+      WHERE tu.user_id = ?
+    `, [user.id]);
 
-    // 4. SINKRONISASI NOTIFIKASI: Cek Kedaluwarsa Realtime di level Tenant
-    let finalStatus = user.tenant_status || "active";
-    let expiredTrial = false;
-    let expiredSubscription = false;
-    let triggerDatabaseUpdate = false;
-    const now = new Date();
-
-    if (user.billing_cycle === "TRIAL" && user.trial_end) {
-      const endTrialDate = new Date(user.trial_end);
-      if (now > endTrialDate) {
+    // Update status kedaluwarsa untuk semua workspace
+    for (let ws of workspaces) {
+      let finalStatus = ws.tenant_status || "active";
+      let triggerUpdate = false;
+      const now = new Date();
+      if (ws.billing_cycle === "TRIAL" && ws.trial_end && now > new Date(ws.trial_end)) {
         finalStatus = "expired";
-        expiredTrial = true;
-        triggerDatabaseUpdate = true;
+        triggerUpdate = true;
+      } else if (ws.package_type !== "FREE" && ws.subscription_ends_at && now > new Date(ws.subscription_ends_at)) {
+        finalStatus = "expired";
+        triggerUpdate = true;
       }
-    } 
-    else if (user.package_type !== "FREE" && user.subscription_ends_at) {
-      const endSubDate = new Date(user.subscription_ends_at);
-      if (now > endSubDate) {
-        finalStatus = "expired";
-        expiredSubscription = true;
-        triggerDatabaseUpdate = true;
+      ws.tenant_status = finalStatus;
+      if (triggerUpdate && ws.tenant_status !== "expired") {
+        await db.query(`UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`, [ws.tenant_id]);
       }
     }
 
-    // 🔥 REVISI: Update target ke tbr_tenants
-    if (triggerDatabaseUpdate && user.tenant_status !== "expired") {
-      await db.query(
-        `UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`,
-        [user.tenant_id]
-      );
-    }
+    // Cek jika tenant legacy disuspended (untuk backward compatibility)
+    // if (user.tenant_status === 'suspended') ... dihilangkan, sekarang per workspace.
 
-    // 5. Generate JWT Token dengan payload data perusahaan yang bersih
+    // 5. Generate JWT Token
     const token = jwt.sign(
       {
         id: user.id,
-        role: user.role,
-        tenant_id: user.tenant_id || 0,
-        package_type: user.package_type || "FREE",
-        subscription_status: finalStatus,
-        billing_cycle: user.billing_cycle || "NONE",
       },
       process.env.JWT_SECRET,
       {
@@ -135,17 +104,21 @@ exports.login = async (req, res) => {
     );
 
     delete user.password;
-    const formattedEndDate = user.billing_cycle === "TRIAL" ? user.trial_end : user.subscription_ends_at;
+    
+    const defaultWorkspace = workspaces.length > 0 ? workspaces[0] : null;
 
     return res.status(200).json({
       success: true,
       token,
       user: {
-        ...user,
-        subscription_status: finalStatus,
-        expired_trial: expiredTrial,
-        expired_subscription: expiredSubscription, 
-        end_date: safeIsoDate(formattedEndDate)
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        workspaces: workspaces,
+        // Backward compatibility
+        tenant_id: defaultWorkspace ? defaultWorkspace.tenant_id : user.tenant_id,
+        role: defaultWorkspace ? defaultWorkspace.role : user.role,
+        subscription_status: defaultWorkspace ? defaultWorkspace.tenant_status : 'active'
       },
     });
 
@@ -170,85 +143,52 @@ exports.getMe = async (req, res) => {
       });
     }
 
-    // 🔥 REVISI: Ambil profil user dan satukan dengan data langganan dari tbr_tenants
-    const [rows] = await db.query(
-      `
-      SELECT
-        u.id,
-        u.name,
-        u.email,
-        u.role,
-        u.tenant_id,
-        t.package_type,
-        t.billing_cycle,
-        t.status as tenant_status,
-        t.trial_start,
-        t.trial_end,
-        t.subscription_ends_at
-      FROM tbr_users u
-      LEFT JOIN tbr_tenants t ON u.tenant_id = t.id
-      WHERE u.id = ?
-      LIMIT 1
-      `,
-      [req.user.id]
-    );
+    // Ambil semua workspaces
+    const [workspaces] = await db.query(`
+      SELECT 
+        tu.tenant_id, tu.role, t.company_name, t.subdomain, t.package_type, t.billing_cycle, t.status as tenant_status, t.trial_end, t.subscription_ends_at
+      FROM tbr_tenant_users tu
+      JOIN tbr_tenants t ON tu.tenant_id = t.id
+      WHERE tu.user_id = ?
+    `, [req.user.id]);
 
-    if (!rows.length) {
-      return res.status(404).json({
-        success: false,
-        message: "User tidak ditemukan",
-      });
-    }
-
-    const user = rows[0];
-
-    let finalStatus = user.tenant_status || "active";
-    let expiredTrial = false;
-    let expiredSubscription = false;
-    let triggerDatabaseUpdate = false;
-    const now = new Date();
-
-    if (user.billing_cycle === "TRIAL" && user.trial_end) {
-      const endTrialDate = new Date(user.trial_end);
-      if (now > endTrialDate) {
+    for (let ws of workspaces) {
+      let finalStatus = ws.tenant_status || "active";
+      let triggerUpdate = false;
+      const now = new Date();
+      if (ws.billing_cycle === "TRIAL" && ws.trial_end && now > new Date(ws.trial_end)) {
         finalStatus = "expired";
-        expiredTrial = true;
-        triggerDatabaseUpdate = true;
+        triggerUpdate = true;
+      } else if (ws.package_type !== "FREE" && ws.subscription_ends_at && now > new Date(ws.subscription_ends_at)) {
+        finalStatus = "expired";
+        triggerUpdate = true;
       }
-    } 
-    else if (user.package_type !== "FREE" && user.subscription_ends_at) {
-      const endSubDate = new Date(user.subscription_ends_at);
-      if (now > endSubDate) {
-        finalStatus = "expired";
-        expiredSubscription = true;
-        triggerDatabaseUpdate = true;
+      ws.tenant_status = finalStatus;
+      if (triggerUpdate && ws.tenant_status !== "expired") {
+        await db.query(`UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`, [ws.tenant_id]);
       }
     }
 
-    if (triggerDatabaseUpdate && user.tenant_status !== "expired") {
-      await db.query(
-        `UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`,
-        [user.tenant_id]
-      );
-    }
-
-    const formattedEndDate = user.billing_cycle === "TRIAL" ? user.trial_end : user.subscription_ends_at;
-
+    const formattedEndDate = req.user.billing_cycle === "TRIAL" ? req.user.trial_end : req.user.subscription_ends_at;
+    
+    // Pastikan req.user mengandung data terbaru yang diinject middleware
     return res.status(200).json({
       success: true,
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        tenant_id: user.tenant_id,
-        package_type: user.package_type || "FREE",
-        billing_cycle: user.billing_cycle || "NONE",
-        subscription_status: finalStatus,
-        trial_start: user.trial_start,
-        trial_end: user.trial_end,
-        expired_trial: expiredTrial,
-        expired_subscription: expiredSubscription, 
+        id: req.user.id,
+        name: req.user.name,
+        email: req.user.email,
+        workspaces: workspaces,
+        // Active context dari middleware (header X-Tenant-ID)
+        tenant_id: req.user.tenant_id,
+        role: req.user.role,
+        package_type: req.user.package_type || "FREE",
+        billing_cycle: req.user.billing_cycle || "NONE",
+        subscription_status: req.user.subscription_status || "active",
+        trial_start: req.user.trial_start,
+        trial_end: req.user.trial_end,
+        expired_trial: req.user.subscription_status === 'expired' && req.user.billing_cycle === 'TRIAL',
+        expired_subscription: req.user.subscription_status === 'expired' && req.user.billing_cycle !== 'TRIAL',
         end_date: safeIsoDate(formattedEndDate)
       },
     });
@@ -342,33 +282,45 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // 5. Buat user pertama sebagai admin/owner tenant tersebut
-    // 🔧 FIX: Sertakan phone_number agar tersimpan (sebelumnya diabaikan meski dikirim frontend)
+    // Tetap insert ke tbr_users dengan legacy tenant_id untuk backup
     const [userResult] = await connection.query(
       `INSERT INTO tbr_users (name, email, password, role, tenant_id, phone_number)
        VALUES (?, ?, ?, 'admin', ?, ?)`,
       [email.trim().toLowerCase(), name, hashedPassword, tenantId, phone_number || null]
     );
+    const newUserId = userResult.insertId;
+
+    // 🔥 REVISI: Masukkan ke tabel pivot tbr_tenant_users
+    await connection.query(
+      `INSERT INTO tbr_tenant_users (user_id, tenant_id, role) VALUES (?, ?, 'admin')`,
+      [newUserId, tenantId]
+    );
 
     await connection.commit();
     connection.release();
 
-    const newUserId = userResult.insertId;
-
-    // 6. Generate JWT langsung (auto-login setelah register)
+    // 6. Generate JWT langsung
     const token = jwt.sign(
       {
         id: newUserId,
-        role: "admin",
-        tenant_id: tenantId,
-        package_type: "FREE",
-        subscription_status: "active",
-        billing_cycle: "TRIAL",
       },
       process.env.JWT_SECRET,
       {
         expiresIn: "7d",
       }
     );
+
+    // Mock workspaces array
+    const workspaces = [{
+      tenant_id: tenantId,
+      role: 'admin',
+      company_name: company_name.trim(),
+      subdomain: subdomain,
+      package_type: 'FREE',
+      billing_cycle: 'TRIAL',
+      tenant_status: 'active',
+      trial_end: trialEnd
+    }];
 
     return res.status(201).json({
       success: true,
@@ -378,6 +330,8 @@ exports.register = async (req, res) => {
         id: newUserId,
         name,
         email,
+        workspaces: workspaces,
+        // Legacy
         role: "admin",
         tenant_id: tenantId,
         package_type: "FREE",
@@ -535,4 +489,148 @@ exports.debugListUsers = async (req, res) => {
     success: false,
     message: "Endpoint debug ini sudah dinonaktifkan.",
   });
+};
+
+// ======================================================
+// 🌐 GOOGLE AUTH LOGIN / REGISTER
+// ======================================================
+exports.googleAuth = async (req, res) => {
+  let connection;
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, message: "Token Google tidak ditemukan." });
+    }
+
+    // Verify token with Google
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    
+    // We need email, name from payload
+    const email = payload.email.trim().toLowerCase();
+    const name = payload.name;
+
+    connection = await db.getConnection();
+    
+    // Check if user exists
+    const [rows] = await connection.query(
+      `SELECT
+        u.id, u.name, u.email, u.role, u.tenant_id,
+        t.package_type, t.billing_cycle, t.status as tenant_status,
+        t.trial_end, t.subscription_ends_at
+       FROM tbr_users u
+       LEFT JOIN tbr_tenants t ON u.tenant_id = t.id
+       WHERE u.email = ? LIMIT 1`,
+      [email]
+    );
+
+    let user = rows[0];
+
+    // If user does not exist, we need to register them automatically
+    if (!user) {
+      await connection.beginTransaction();
+
+      const company_name = name + " Workspace";
+      const trialStart = new Date();
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 14);
+
+      const baseSlug = company_name.toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "workspace";
+      const randomSuffix = Math.random().toString(36).slice(2, 8);
+      const subdomain = `${baseSlug}-${randomSuffix}`;
+
+      const [tenantResult] = await connection.query(
+        `INSERT INTO tbr_tenants (company_name, package_type, billing_cycle, status, trial_start, trial_end, subdomain) VALUES (?, 'FREE', 'TRIAL', 'active', ?, ?, ?)`,
+        [company_name.trim(), trialStart.toISOString().slice(0, 19).replace("T", " "), trialEnd.toISOString().slice(0, 19).replace("T", " "), subdomain]
+      );
+      const tenantId = tenantResult.insertId;
+
+      const randomPassword = crypto.randomBytes(16).toString("hex");
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+      const [userResult] = await connection.query(
+        `INSERT INTO tbr_users (name, email, password, role, tenant_id) VALUES (?, ?, ?, 'admin', ?)`,
+        [email, name, hashedPassword, tenantId]
+      );
+      const newUserId = userResult.insertId;
+
+      await connection.query(
+        `INSERT INTO tbr_tenant_users (user_id, tenant_id, role) VALUES (?, ?, 'admin')`,
+        [newUserId, tenantId]
+      );
+
+      await connection.commit();
+
+      // Refresh user object directly to match standard login flow
+      user = { id: newUserId, name: name, email: email };
+    }
+
+    // Ambil daftar workspace
+    const [workspaces] = await connection.query(`
+      SELECT 
+        tu.tenant_id, tu.role, t.company_name, t.subdomain, t.package_type, t.billing_cycle, t.status as tenant_status, t.trial_end, t.subscription_ends_at
+      FROM tbr_tenant_users tu
+      JOIN tbr_tenants t ON tu.tenant_id = t.id
+      WHERE tu.user_id = ?
+    `, [user.id]);
+
+    for (let ws of workspaces) {
+      let finalStatus = ws.tenant_status || "active";
+      let triggerUpdate = false;
+      const now = new Date();
+      if (ws.billing_cycle === "TRIAL" && ws.trial_end && now > new Date(ws.trial_end)) {
+        finalStatus = "expired";
+        triggerUpdate = true;
+      } else if (ws.package_type !== "FREE" && ws.subscription_ends_at && now > new Date(ws.subscription_ends_at)) {
+        finalStatus = "expired";
+        triggerUpdate = true;
+      }
+      ws.tenant_status = finalStatus;
+      if (triggerUpdate && ws.tenant_status !== "expired") {
+        await connection.query(`UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`, [ws.tenant_id]);
+      }
+    }
+
+    if (connection) {
+       connection.release();
+       connection = null;
+    }
+
+    const jwtToken = jwt.sign(
+      { id: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+    
+    const defaultWorkspace = workspaces.length > 0 ? workspaces[0] : null;
+
+    return res.status(200).json({
+      success: true,
+      token: jwtToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        workspaces: workspaces,
+        // Legacy
+        tenant_id: defaultWorkspace ? defaultWorkspace.tenant_id : null,
+        role: defaultWorkspace ? defaultWorkspace.role : null,
+        subscription_status: defaultWorkspace ? defaultWorkspace.tenant_status : 'active'
+      },
+    });
+
+  } catch (error) {
+    if (connection) {
+      try { await connection.rollback(); connection.release(); } catch (e) {}
+    }
+    console.error("GOOGLE AUTH ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Gagal login dengan Google",
+      error: error.message,
+    });
+  }
 };

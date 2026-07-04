@@ -31,34 +31,61 @@ const verifyToken = async (req, res, next) => {
     // 3. Verifikasi tanda tangan token JWT
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 4. Tarik data paket, masa trial, dan status komersial langsung dari tbr_tenants
-    const sql = `
-      SELECT 
-        u.id,
-        u.name,
-        u.email,
-        u.role,
-        u.tenant_id,
-        t.status as tenant_status,
-        t.package_type,
-        t.billing_cycle,
-        t.trial_start,
-        t.trial_end,
-        t.subscription_ends_at
-      FROM tbr_users u
-      LEFT JOIN tbr_tenants t ON u.tenant_id = t.id
-      WHERE u.id = ?
-    `;
-    const [rows] = await db.query(sql, [decoded.id]);
+    const requestedTenantId = req.header("X-Tenant-ID");
+
+    // 4. Tarik data user dan cek akses ke tenant
+    let sql;
+    let params;
+
+    if (requestedTenantId) {
+      sql = `
+        SELECT 
+          u.id, u.name, u.email,
+          tu.role, tu.tenant_id,
+          t.status as tenant_status, t.package_type, t.billing_cycle, t.trial_start, t.trial_end, t.subscription_ends_at
+        FROM tbr_users u
+        INNER JOIN tbr_tenant_users tu ON u.id = tu.user_id
+        INNER JOIN tbr_tenants t ON tu.tenant_id = t.id
+        WHERE u.id = ? AND tu.tenant_id = ?
+        LIMIT 1
+      `;
+      params = [decoded.id, requestedTenantId];
+    } else {
+      // Fallback: ambil tenant pertama (atau biarkan tenant_id null jika tidak punya workspace)
+      sql = `
+        SELECT 
+          u.id, u.name, u.email,
+          tu.role, tu.tenant_id,
+          t.status as tenant_status, t.package_type, t.billing_cycle, t.trial_start, t.trial_end, t.subscription_ends_at
+        FROM tbr_users u
+        LEFT JOIN tbr_tenant_users tu ON u.id = tu.user_id
+        LEFT JOIN tbr_tenants t ON tu.tenant_id = t.id
+        WHERE u.id = ?
+        ORDER BY tu.joined_at ASC
+        LIMIT 1
+      `;
+      params = [decoded.id];
+    }
+
+    const [rows] = await db.query(sql, params);
 
     if (rows.length === 0) {
       return res.status(401).json({
         success: false,
-        message: "User tidak ditemukan",
+        message: "User tidak ditemukan atau tidak memiliki akses ke Workspace ini",
       });
     }
 
     const user = rows[0];
+
+    // Jika user punya akun tapi belum terdaftar di tenant mana pun (kasus langka)
+    if (!user.tenant_id) {
+       req.user = {
+         id: user.id, name: user.name, email: user.email, role: 'member', tenant_id: null,
+         package_type: 'FREE', subscription_status: 'active', billing_cycle: 'NONE'
+       };
+       return next();
+    }
 
     // 5. Proteksi Tambahan: Jika perusahaan/tenant dibekukan oleh admin utama pusat
     if (user.tenant_status === 'suspended') {

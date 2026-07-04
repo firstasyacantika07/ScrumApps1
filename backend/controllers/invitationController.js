@@ -46,75 +46,132 @@ exports.inviteUser = async (req, res) => {
     email = email.trim().toLowerCase();
 
     // A. Validasi apakah email sudah terdaftar sebagai user aktif
-    const [existingUser] = await db.query('SELECT id FROM tbr_users WHERE email = ?', [email]);
-    if (existingUser.length > 0) {
-      return res.status(400).json({ success: false, message: "Email ini sudah terdaftar sebagai pengguna aktif." });
-    }
+    const [existingUsers] = await db.query('SELECT id, name FROM tbr_users WHERE email = ?', [email]);
+    
+    if (existingUsers.length > 0) {
+      // ==========================================
+      // ALUR EXISTING USER: Langsung gabungkan ke Workspace
+      // ==========================================
+      const existingUser = existingUsers[0];
+      
+      // Cek apakah user sudah ada di workspace ini
+      const [existingPivot] = await db.query('SELECT id FROM tbr_tenant_users WHERE user_id = ? AND tenant_id = ?', [existingUser.id, tenantId]);
+      
+      if (existingPivot.length > 0) {
+        return res.status(400).json({ success: false, message: "User ini sudah berada di dalam Workspace Anda." });
+      }
 
-    // B. Generate Token Unik & Set Expired 24 Jam
-    const inviteToken = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); 
+      // Masukkan ke pivot tabel
+      await db.query(`INSERT INTO tbr_tenant_users (user_id, tenant_id, role) VALUES (?, ?, ?)`, [existingUser.id, tenantId, role]);
 
-    // C. Bersihkan sisa undangan pending lama dengan email yang sama
-    await db.query('DELETE FROM tbr_invitations WHERE email = ? AND status = "pending"', [email]);
+      // SINKRONISASI KE PROJECT (Sama seperti logika acceptInvitation)
+      const normalizeRole = (r) => (r ? String(r).replace(/\s+/g, '').toLowerCase().trim() : '');
+      const PROJECT_ROLE_MAP = {
+        projectowner: 'ProjectOwner',
+        businessanalyst: 'BusinessAnalyst',
+        teamdeveloper: 'TeamDeveloper',
+      };
+      const canonicalProjectRole = PROJECT_ROLE_MAP[normalizeRole(role)];
 
-    // D. Simpan data undangan ke tabel tbr_invitations
-    const insertQuery = `
-      INSERT INTO tbr_invitations (email, role, tenant_id, token, expires_at, status)
-      VALUES (?, ?, ?, ?, ?, 'pending')
-    `;
-    await db.query(insertQuery, [email, role, tenantId, inviteToken, expiresAt]);
+      if (canonicalProjectRole) {
+        const [activeProjects] = await db.query(`SELECT id FROM tbr_projects WHERE tenant_id = ?`, [tenantId]);
+        if (activeProjects.length > 0) {
+          const insertProjectValues = activeProjects.map(proj => [proj.id, existingUser.id, canonicalProjectRole]);
+          await db.query(`INSERT IGNORE INTO tbr_project_members (project_id, user_id, role_in_project) VALUES ?`, [insertProjectValues]);
+        }
+      }
 
-    // E. Susun Tautan Verifikasi Menuju Frontend
-    const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const inviteLink = `${frontendBaseUrl}/accept-invite?token=${inviteToken}`;
-
-    // F. Desain Template Email Premium Bertema Merah Putih (#ee1e2d)
-    const mailOptions = {
-      // 🔧 FIX: typo alamat pengirim sebelumnya beda dengan akun SMTP yang login (auth.user),
-      // sekarang dipakai variabel yang sama supaya konsisten dan tidak ditandai spam.
-      from: `"ScrumApps System" <${process.env.SMTP_USER}>`,
-      to: email,
-      subject: `Undangan Bergabung ke Workspace ${companyName}`,
-      html: `
-        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 550px; margin: 0 auto; padding: 30px; border: 1px solid #f0f0f0; border-radius: 24px; background-color: #ffffff;">
-          <div style="text-align: center; margin-bottom: 30px;">
-            <h2 style="color: #ee1e2d; margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px;">ScrumApps</h2>
-            <p style="color: #94a3b8; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin-top: 5px; font-weight: bold;">SaaS Agile Project Management</p>
+      // Kirim Email Notifikasi
+      const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const mailOptions = {
+        from: `"ScrumApps System" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: `Anda Ditambahkan ke Workspace ${companyName}`,
+        html: `
+          <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 550px; margin: 0 auto; padding: 30px; border: 1px solid #f0f0f0; border-radius: 24px; background-color: #ffffff;">
+            <div style="text-align: center; margin-bottom: 30px;">
+              <h2 style="color: #ee1e2d; margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px;">ScrumApps</h2>
+            </div>
+            <p style="color: #334155; font-size: 14px; line-height: 1.6;">Halo ${existingUser.name},</p>
+            <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+              Anda telah ditambahkan oleh Admin ke dalam Workspace <strong>${companyName}</strong> sebagai <span style="color: #ee1e2d; font-weight: bold;">${role}</span>.
+            </p>
+            <div style="text-align: center; margin: 35px 0;">
+              <a href="${frontendBaseUrl}/login" style="background-color: #0f172a; color: #ffffff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 13px; font-weight: bold; display: inline-block;">
+                Buka ScrumApps
+              </a>
+            </div>
           </div>
-          
-          <p style="color: #334155; font-size: 14px; line-height: 1.6;">Halo,</p>
-          <p style="color: #334155; font-size: 14px; line-height: 1.6;">
-            Anda telah diundang oleh Admin dari <strong>${companyName}</strong> untuk bergabung ke dalam repositori manajemen proyek mereka sebagai <span style="color: #ee1e2d; font-weight: bold;">${role}</span>.
-          </p>
-          
-          <div style="text-align: center; margin: 35px 0;">
-            <a href="${inviteLink}" style="background-color: #0f172a; color: #ffffff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 13px; font-weight: bold; display: inline-block; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-              Terima Undangan & Atur Profil
-            </a>
-          </div>
-          
-          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 12px; margin-bottom: 25px;">
-            <p style="color: #64748b; font-size: 11px; margin: 0; line-height: 1.5;">
-              ⚠️ <strong>Penting:</strong> Tautan di atas hanya berlaku selama <strong>24 jam</strong> sejak email ini dikirimkan. Jika tautan kedaluwarsa, silakan hubungi admin Anda untuk menjadwalkan ulang tautan baru.
+        `,
+      };
+      await transporter.sendMail(mailOptions);
+
+      return res.status(200).json({
+        success: true,
+        message: "Pengguna sudah memiliki akun dan berhasil ditambahkan ke Workspace Anda secara langsung.",
+      });
+
+    } else {
+      // ==========================================
+      // ALUR NEW USER: Kirim Tautan Undangan
+      // ==========================================
+      const inviteToken = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); 
+
+      await db.query('DELETE FROM tbr_invitations WHERE email = ? AND status = "pending"', [email]);
+
+      const insertQuery = `
+        INSERT INTO tbr_invitations (email, role, tenant_id, token, expires_at, status)
+        VALUES (?, ?, ?, ?, ?, 'pending')
+      `;
+      await db.query(insertQuery, [email, role, tenantId, inviteToken, expiresAt]);
+
+      const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const inviteLink = `${frontendBaseUrl}/accept-invite?token=${inviteToken}`;
+
+      const mailOptions = {
+        from: `"ScrumApps System" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: `Undangan Bergabung ke Workspace ${companyName}`,
+        html: `
+          <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 550px; margin: 0 auto; padding: 30px; border: 1px solid #f0f0f0; border-radius: 24px; background-color: #ffffff;">
+            <div style="text-align: center; margin-bottom: 30px;">
+              <h2 style="color: #ee1e2d; margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px;">ScrumApps</h2>
+              <p style="color: #94a3b8; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin-top: 5px; font-weight: bold;">SaaS Agile Project Management</p>
+            </div>
+            
+            <p style="color: #334155; font-size: 14px; line-height: 1.6;">Halo,</p>
+            <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+              Anda telah diundang oleh Admin dari <strong>${companyName}</strong> untuk bergabung ke dalam repositori manajemen proyek mereka sebagai <span style="color: #ee1e2d; font-weight: bold;">${role}</span>.
+            </p>
+            
+            <div style="text-align: center; margin: 35px 0;">
+              <a href="${inviteLink}" style="background-color: #0f172a; color: #ffffff; padding: 14px 32px; border-radius: 12px; text-decoration: none; font-size: 13px; font-weight: bold; display: inline-block; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                Terima Undangan & Atur Profil
+              </a>
+            </div>
+            
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 12px; margin-bottom: 25px;">
+              <p style="color: #64748b; font-size: 11px; margin: 0; line-height: 1.5;">
+                ⚠️ <strong>Penting:</strong> Tautan di atas hanya berlaku selama <strong>24 jam</strong> sejak email ini dikirimkan. Jika tautan kedaluwarsa, silakan hubungi admin Anda untuk menjadwalkan ulang tautan baru.
+              </p>
+            </div>
+            
+            <hr style="border: none; border-top: 1px solid #f1f5f9; margin-bottom: 20px;" />
+            <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">
+              Email ini dikirim secara otomatis oleh sistem ScrumApps. Mohon untuk tidak membalas email ini.
             </p>
           </div>
-          
-          <hr style="border: none; border-top: 1px solid #f1f5f9; margin-bottom: 20px;" />
-          <p style="color: #94a3b8; font-size: 11px; text-align: center; margin: 0;">
-            Email ini dikirim secara otomatis oleh sistem ScrumApps. Mohon untuk tidak membalas email ini.
-          </p>
-        </div>
-      `,
-    };
+        `,
+      };
 
-    // G. Eksekusi Pengiriman Email Fisik
-    await transporter.sendMail(mailOptions);
+      await transporter.sendMail(mailOptions);
 
-    return res.status(200).json({
-      success: true,
-      message: "Email undangan berhasil dirilis dan dikirim ke server tujuan.",
-    });
+      return res.status(200).json({
+        success: true,
+        message: "Email undangan berhasil dirilis dan dikirim ke server tujuan.",
+      });
+    }
 
   } catch (error) {
     console.error("❌ NODEMAILER / DB ERROR:", error);

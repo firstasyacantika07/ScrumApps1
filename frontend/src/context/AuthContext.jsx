@@ -58,6 +58,28 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
     }, []);
 
+    const switchWorkspace = (tenantId) => {
+        if (!user || !user.workspaces) return;
+        const selected = user.workspaces.find(ws => ws.tenant_id === Number(tenantId));
+        
+        if (selected) {
+            const updatedUser = {
+                ...user,
+                tenant_id: selected.tenant_id,
+                role: selected.role,
+                package_type: selected.package_type,
+                billing_cycle: selected.billing_cycle,
+                subscription_status: selected.tenant_status,
+                trial_end: selected.trial_end
+            };
+            localStorage.setItem('user', JSON.stringify(updatedUser));
+            setUser(updatedUser);
+            
+            // Reload halaman untuk mereset semua state aplikasi (cara paling aman)
+            window.location.href = '/dashboard';
+        }
+    };
+
     const hasRole = (allowedRoles = []) => {
         if (!user) return false;
         return allowedRoles.includes(user.role);
@@ -75,6 +97,7 @@ export const AuthProvider = ({ children }) => {
             loading,
             login,
             logout,
+            switchWorkspace,
             hasRole,
             isSubscriptionActive,
             packageType: user?.package_type || 'FREE'
