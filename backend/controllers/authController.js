@@ -56,8 +56,17 @@ exports.login = async (req, res) => {
       hashedPassword = "$2a$" + hashedPassword.slice(4);
     }
 
+    // 🔍 TEMPORARY DEBUG — hapus blok ini setelah masalah login selesai
+    console.log("=== LOGIN DEBUG ===");
+    console.log("Email diterima:", JSON.stringify(email));
+    console.log("Password diterima:", JSON.stringify(password), "| panjang:", password.length);
+    console.log("Hash dari DB (raw):", JSON.stringify(user.password), "| panjang:", user.password.length);
+    console.log("Hash setelah normalisasi:", JSON.stringify(hashedPassword), "| panjang:", hashedPassword.length);
+    console.log("===================");
+
     // 3. Verifikasi Password
     const isMatch = await bcrypt.compare(password, hashedPassword);
+    console.log("Hasil bcrypt.compare:", isMatch);
 
     if (!isMatch) {
       return res.status(401).json({
@@ -87,9 +96,19 @@ exports.login = async (req, res) => {
         finalStatus = "expired";
         triggerUpdate = true;
       }
+<<<<<<< HEAD
       ws.tenant_status = finalStatus;
       if (triggerUpdate && ws.tenant_status !== "expired") {
         await db.query(`UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`, [ws.tenant_id]);
+=======
+    }
+    else if (user.package_type !== "FREE" && user.subscription_ends_at) {
+      const endSubDate = new Date(user.subscription_ends_at);
+      if (now > endSubDate) {
+        finalStatus = "expired";
+        expiredSubscription = true;
+        triggerDatabaseUpdate = true;
+>>>>>>> f9c08313c146db78f9d8372e2156d38f1c93be5f
       }
     }
 
@@ -115,6 +134,7 @@ exports.login = async (req, res) => {
       success: true,
       token,
       user: {
+<<<<<<< HEAD
         id: user.id,
         name: user.name,
         email: user.email,
@@ -123,6 +143,13 @@ exports.login = async (req, res) => {
         tenant_id: defaultWorkspace ? defaultWorkspace.tenant_id : user.tenant_id,
         role: defaultWorkspace ? defaultWorkspace.role : user.role,
         subscription_status: defaultWorkspace ? defaultWorkspace.tenant_status : 'active'
+=======
+        ...user,
+        subscription_status: finalStatus,
+        expired_trial: expiredTrial,
+        expired_subscription: expiredSubscription,
+        end_date: safeIsoDate(formattedEndDate)
+>>>>>>> f9c08313c146db78f9d8372e2156d38f1c93be5f
       },
     });
 
@@ -167,9 +194,19 @@ exports.getMe = async (req, res) => {
         finalStatus = "expired";
         triggerUpdate = true;
       }
+<<<<<<< HEAD
       ws.tenant_status = finalStatus;
       if (triggerUpdate && ws.tenant_status !== "expired") {
         await db.query(`UPDATE tbr_tenants SET status = 'expired' WHERE id = ?`, [ws.tenant_id]);
+=======
+    }
+    else if (user.package_type !== "FREE" && user.subscription_ends_at) {
+      const endSubDate = new Date(user.subscription_ends_at);
+      if (now > endSubDate) {
+        finalStatus = "expired";
+        expiredSubscription = true;
+        triggerDatabaseUpdate = true;
+>>>>>>> f9c08313c146db78f9d8372e2156d38f1c93be5f
       }
     }
 
@@ -179,6 +216,7 @@ exports.getMe = async (req, res) => {
     return res.status(200).json({
       success: true,
       user: {
+<<<<<<< HEAD
         id: req.user.id,
         name: req.user.name,
         email: req.user.email,
@@ -193,6 +231,20 @@ exports.getMe = async (req, res) => {
         trial_end: req.user.trial_end,
         expired_trial: req.user.subscription_status === 'expired' && req.user.billing_cycle === 'TRIAL',
         expired_subscription: req.user.subscription_status === 'expired' && req.user.billing_cycle !== 'TRIAL',
+=======
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        tenant_id: user.tenant_id,
+        package_type: user.package_type || "FREE",
+        billing_cycle: user.billing_cycle || "NONE",
+        subscription_status: finalStatus,
+        trial_start: user.trial_start,
+        trial_end: user.trial_end,
+        expired_trial: expiredTrial,
+        expired_subscription: expiredSubscription,
+>>>>>>> f9c08313c146db78f9d8372e2156d38f1c93be5f
         end_date: safeIsoDate(formattedEndDate)
       },
     });
@@ -290,7 +342,7 @@ exports.register = async (req, res) => {
     const [userResult] = await connection.query(
       `INSERT INTO tbr_users (name, email, password, role, tenant_id, phone_number)
        VALUES (?, ?, ?, 'admin', ?, ?)`,
-      [email.trim().toLowerCase(), name, hashedPassword, tenantId, phone_number || null]
+      [name, email.trim().toLowerCase(), hashedPassword, tenantId, phone_number || null]
     );
     const newUserId = userResult.insertId;
 
