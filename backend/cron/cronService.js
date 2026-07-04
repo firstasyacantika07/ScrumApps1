@@ -43,7 +43,6 @@ const runSprintReminderJob = async (targetUserId = null) => {
       JOIN tbr_users u ON pm.user_id = u.id
       WHERE pm.role_in_project = 'ProjectOwner'
       AND DATEDIFF(s.end_date, NOW()) < 3
-      AND DATEDIFF(s.end_date, NOW()) >= 0
       ${userFilter}
     `, params);
 

@@ -27,7 +27,7 @@ import Info from './pages/Info';
 import KelolaProfil from './pages/KelolaProfil';
 import Billing from './pages/Billing';
 import Payment from './pages/Payment';
-import Companies from './pages/SuperAdmin/Companies'; 
+import Companies from './pages/SuperAdmin/Companies';
 import BillingTracker from './pages/SuperAdmin/BillingTracker';
 import GitHubIntegrations from './pages/SuperAdmin/GitHubIntegrations';
 import BacklogPage from './pages/Backlogpage';
@@ -62,7 +62,7 @@ const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
     alert(`Akses Ditolak! Anda tidak memiliki izin untuk halaman ini. (Role saat ini: ${userRole || 'Tidak Diketahui'})`);
     return <Navigate to="/dashboard" replace />;
   }
-  
+
   return children;
 };
 

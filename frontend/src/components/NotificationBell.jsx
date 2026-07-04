@@ -11,7 +11,7 @@ const NotificationBell = () => {
     const fetchNotifications = async () => {
       try {
         const response = await api.get('/notifications');
-        const data = response.data.data;
+        const data = response.data.notifications; // FIX: backend mengembalikan key "notifications", bukan "data"
         
         if (Array.isArray(data)) {
           setNotifications(data);

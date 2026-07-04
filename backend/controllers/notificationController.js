@@ -63,7 +63,8 @@ exports.getMyNotifications = async (req, res) => {
         const onlyUnread = req.query.unread === 'true';
 
         const [notifications] = await sqlDb.query(
-            `SELECT id, project_id, type, title, message, is_read, created_at
+            `SELECT id, project_id AS projectId, type, title, message,
+                    is_read AS isRead, created_at AS createdAt
              FROM tbr_notifications
              WHERE user_id = ? ${onlyUnread ? 'AND is_read = 0' : ''}
              ORDER BY created_at DESC

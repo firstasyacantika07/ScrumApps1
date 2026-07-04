@@ -69,8 +69,17 @@ exports.login = async (req, res) => {
       hashedPassword = "$2a$" + hashedPassword.slice(4);
     }
 
+    // 🔍 TEMPORARY DEBUG — hapus blok ini setelah masalah login selesai
+    console.log("=== LOGIN DEBUG ===");
+    console.log("Email diterima:", JSON.stringify(email));
+    console.log("Password diterima:", JSON.stringify(password), "| panjang:", password.length);
+    console.log("Hash dari DB (raw):", JSON.stringify(user.password), "| panjang:", user.password.length);
+    console.log("Hash setelah normalisasi:", JSON.stringify(hashedPassword), "| panjang:", hashedPassword.length);
+    console.log("===================");
+
     // 3. Verifikasi Password
     const isMatch = await bcrypt.compare(password, hashedPassword);
+    console.log("Hasil bcrypt.compare:", isMatch);
 
     if (!isMatch) {
       return res.status(401).json({
@@ -101,7 +110,7 @@ exports.login = async (req, res) => {
         expiredTrial = true;
         triggerDatabaseUpdate = true;
       }
-    } 
+    }
     else if (user.package_type !== "FREE" && user.subscription_ends_at) {
       const endSubDate = new Date(user.subscription_ends_at);
       if (now > endSubDate) {
@@ -145,7 +154,7 @@ exports.login = async (req, res) => {
         ...user,
         subscription_status: finalStatus,
         expired_trial: expiredTrial,
-        expired_subscription: expiredSubscription, 
+        expired_subscription: expiredSubscription,
         end_date: safeIsoDate(formattedEndDate)
       },
     });
@@ -216,7 +225,7 @@ exports.getMe = async (req, res) => {
         expiredTrial = true;
         triggerDatabaseUpdate = true;
       }
-    } 
+    }
     else if (user.package_type !== "FREE" && user.subscription_ends_at) {
       const endSubDate = new Date(user.subscription_ends_at);
       if (now > endSubDate) {
@@ -249,7 +258,7 @@ exports.getMe = async (req, res) => {
         trial_start: user.trial_start,
         trial_end: user.trial_end,
         expired_trial: expiredTrial,
-        expired_subscription: expiredSubscription, 
+        expired_subscription: expiredSubscription,
         end_date: safeIsoDate(formattedEndDate)
       },
     });
@@ -347,7 +356,7 @@ exports.register = async (req, res) => {
     const [userResult] = await connection.query(
       `INSERT INTO tbr_users (name, email, password, role, tenant_id, phone_number)
        VALUES (?, ?, ?, 'admin', ?, ?)`,
-      [email.trim().toLowerCase(), name, hashedPassword, tenantId, phone_number || null]
+      [name, email.trim().toLowerCase(), hashedPassword, tenantId, phone_number || null]
     );
 
     await connection.commit();

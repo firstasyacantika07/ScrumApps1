@@ -35,7 +35,13 @@ router.get('/', verifyToken, async (req, res) => {
       createdAt: n.created_at
     }));
 
-    res.status(200).json({ success: true, data: notifications });
+    // 🔧 FIX: sebelumnya key response ini "data", padahal NotificationBell.jsx
+    // membaca response.data.notifications (key "notifications"). Akibatnya
+    // fetch selalu dianggap gagal (Array.isArray(undefined) === false) dan
+    // lonceng notifikasi selalu tampil "Tidak ada notifikasi" walau row-nya
+    // sudah tersimpan di tabel tbr_notifications. Key diganti jadi
+    // "notifications" tanpa mengubah struktur/isi data lain.
+    res.status(200).json({ success: true, notifications });
   } catch (err) {
     console.error("Error fetching notifications:", err);
     res.status(500).json({ success: false, message: "Gagal mengambil data notifikasi" });

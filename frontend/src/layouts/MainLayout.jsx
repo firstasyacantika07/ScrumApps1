@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { User, Search, LogOut } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import NotificationBell from '../components/NotificationBell';
+import api from '../api/axios';
 
 // ✅ Import useAuth untuk ambil user & logout dari AuthContext
 import { useAuth } from '../context/AuthContext';
@@ -14,6 +15,67 @@ const MainLayout = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const navigate = useNavigate();
+
+  // 🔍 State untuk fitur pencarian proyek di header
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allProjects, setAllProjects] = useState([]);
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const searchBoxRef = useRef(null);
+
+  // Ambil daftar proyek sekali saat layout dimuat, dipakai untuk filter pencarian
+  // (dilewati untuk Superadmin karena search bar tidak ditampilkan untuk role ini)
+  useEffect(() => {
+    const roleNormalized = user?.role?.toString().toLowerCase().replace(/[\s_-]/g, '') || '';
+    if (roleNormalized === 'superadmin') return;
+
+    let isMounted = true;
+    const fetchProjects = async () => {
+      try {
+        setIsSearchLoading(true);
+        const res = await api.get('/projects');
+        const data = res.data?.data || res.data || [];
+        if (isMounted) setAllProjects(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.warn('Gagal memuat daftar proyek untuk pencarian:', err.message);
+      } finally {
+        if (isMounted) setIsSearchLoading(false);
+      }
+    };
+    fetchProjects();
+    return () => { isMounted = false; };
+  }, [user]);
+
+  // Filter proyek setiap kali query berubah
+  useEffect(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) {
+      setSearchResults([]);
+      return;
+    }
+    const filtered = allProjects.filter((p) =>
+      (p.name || p.title || '').toLowerCase().includes(q)
+    );
+    setSearchResults(filtered.slice(0, 8));
+  }, [searchQuery, allProjects]);
+
+  // Tutup dropdown hasil pencarian saat klik di luar area search box
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target)) {
+        setIsSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectProject = (project) => {
+    setSearchQuery('');
+    setIsSearchOpen(false);
+    navigate(`/projects/${project.id}`);
+  };
 
   // Jika session kosong/loading belum selesai, return null agar tidak crash
   if (!user) return null;
@@ -40,15 +102,48 @@ const MainLayout = () => {
         
         {/* HEADER */}
         <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-8 shrink-0">
-          {/* Search Bar */}
-          <div className="hidden md:flex items-center bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 w-72">
-            <Search size={18} className="text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Cari proyek..." 
-              className="bg-transparent border-none focus:ring-0 text-sm ml-2 w-full outline-none" 
-            />
+          {/* Search Bar — disembunyikan untuk role Superadmin */}
+          {user?.role?.toString().toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin' && (
+          <div className="hidden md:flex flex-col relative w-72" ref={searchBoxRef}>
+            <div className="flex items-center bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+              <Search size={18} className="text-slate-400" />
+              <input
+                type="text"
+                placeholder="Cari proyek..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setIsSearchOpen(true);
+                }}
+                onFocus={() => setIsSearchOpen(true)}
+                className="bg-transparent border-none focus:ring-0 text-sm ml-2 w-full outline-none"
+              />
+            </div>
+
+            {/* Dropdown hasil pencarian */}
+            {isSearchOpen && searchQuery.trim() && (
+              <div className="absolute top-full mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-xl z-50 overflow-hidden">
+                {isSearchLoading ? (
+                  <div className="px-4 py-3 text-xs text-slate-400 font-semibold">Memuat proyek...</div>
+                ) : searchResults.length > 0 ? (
+                  searchResults.map((project) => (
+                    <button
+                      key={project.id}
+                      onClick={() => handleSelectProject(project)}
+                      className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-b-0"
+                    >
+                      {project.name || project.title}
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-xs text-slate-400 font-semibold">
+                    Tidak ada proyek dengan nama tersebut
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+          )}
           
           <div className="flex items-center gap-6 ml-auto">
             {/* Notification Bell: dropdown notifikasi real dari API, muncul di semua halaman */}
