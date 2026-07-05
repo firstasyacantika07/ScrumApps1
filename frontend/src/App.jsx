@@ -20,7 +20,7 @@ import AcceptInvite from './pages/Acceptinvite';
 // PROTECTED PAGES
 // ======================================================
 import Dashboard from './pages/Dashboard';
-import ProjectList from './pages/ProjectList';
+import ProjectList from './pages/Projectlist'
 import ProjectDetail from './pages/ProjectDetail';
 import Users from './pages/Users';
 import Info from './pages/Info';
@@ -70,10 +70,25 @@ const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
 // ✅ APP ROUTES SYSTEM
 // ======================================================
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth(); // 👈 Ambil fungsi logout jika tersedia di context
+  const [isInitialRun, setIsInitialRun] = useState(true);
 
-  // Tunggu AuthContext selesai inisialisasi, mencegah blank screen saat refresh
-  if (loading) {
+  // 🛠️ EFEK BARU: Memastikan sesi dibersihkan saat pertama kali aplikasi di-run / direfresh
+  useEffect(() => {
+    // Menghapus token dari localStorage agar rute kembali ke Login
+    localStorage.removeItem("token"); 
+    localStorage.removeItem("user");
+    
+    // Jika ada fungsi logout bawaan dari AuthContext, panggil di sini
+    if (logout) {
+      logout();
+    }
+
+    setIsInitialRun(false);
+  }, [logout]);
+
+  // Tunggu AuthContext selesai inisialisasi atau tunggu proses pembersihan awal selesai
+  if (loading || isInitialRun) {
     return (
       <div style={{
         display: 'flex', justifyContent: 'center',
@@ -87,9 +102,10 @@ function AppRoutes() {
   return (
     <Routes>
       {/* PUBLIC ROUTES */}
+      {/* 🛠️ DIUBAH: Sekarang default route langsung melempar ke /login */}
       <Route
         path="/"
-        element={<Navigate to={user ? '/dashboard' : '/login'} replace />}
+        element={<Navigate to="/login" replace />}
       />
       <Route
         path="/login"
