@@ -5,7 +5,6 @@ import { Building2, ChevronDown } from 'lucide-react';
 const WorkspaceSwitcher = () => {
     const { user, switchWorkspace } = useAuth();
 
-    // Pastikan workspaces ada (Superadmin mungkin tidak punya)
     const workspaces = user?.workspaces || [];
 
     if (workspaces.length <= 1) {

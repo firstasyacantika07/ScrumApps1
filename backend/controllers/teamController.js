@@ -2,7 +2,7 @@
 const db = require('../config/db');
 
 /**
- * 👥 1. ADD TEAM MEMBER (Sudah Terproteksi checkTeamLimit di Router)
+ * 👥 1. ADD TEAM MEMBER (Terproteksi Multi-Tenant & Aman Lintas Workspace)
  * =========================================================================
  */
 exports.addTeamMember = async (req, res) => {
@@ -21,7 +21,7 @@ exports.addTeamMember = async (req, res) => {
       return res.status(403).json({ success: false, message: "Akun Anda tidak terhubung ke workspace manapun." });
     }
 
-    // Validasi Keamanan: Pastikan proyek milik tenant Admin yang login
+    // 1. Validasi Keamanan: Pastikan proyek milik tenant Admin yang sedang login
     const [projectCheck] = await db.query(
       'SELECT id FROM tbr_projects WHERE id = ? AND tenant_id = ?',
       [projectId, tenantId]
@@ -30,7 +30,19 @@ exports.addTeamMember = async (req, res) => {
       return res.status(403).json({ success: false, message: "Akses Ditolak: Proyek tidak berada di bawah workspace Anda." });
     }
 
-    // Cek duplikasi anggota di proyek ini
+    // 2. ✅ FIX TAMBAHAN: Pastikan target user_id yang mau dimasukkan memang terdaftar di workspace/tenant ini
+    const [workspaceCheck] = await db.query(
+      'SELECT id FROM tbr_tenant_users WHERE user_id = ? AND tenant_id = ?',
+      [user_id, tenantId]
+    );
+    if (workspaceCheck.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Gagal menambahkan: User tersebut bukan bagian dari workspace Anda. Daftarkan atau invite user ke workspace terlebih dahulu." 
+      });
+    }
+
+    // 3. Cek duplikasi keanggotaan di proyek ini
     const [existing] = await db.query(
       `SELECT id FROM tbr_project_members WHERE project_id = ? AND user_id = ?`,
       [projectId, user_id]
@@ -43,7 +55,7 @@ exports.addTeamMember = async (req, res) => {
     // Standardisasi string role agar aman disimpan
     const cleanRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
 
-    // 🔧 FIX: Menyimpan nilai ke kolom role_in_project
+    // Menyimpan nilai ke kolom role_in_project
     await db.query(
       `INSERT INTO tbr_project_members (project_id, user_id, role_in_project, created_at) 
        VALUES (?, ?, ?, NOW())`,
@@ -82,16 +94,16 @@ exports.getTeamByProject = async (req, res) => {
       return res.status(403).json({ success: false, message: "Akses Ditolak." });
     }
     
-    // 🔧 FIX: Tarik pm.role_in_project sebagai 'role' agar frontend tidak perlu mengubah nama properti
+    // Tarik pm.role_in_project sebagai 'role' agar frontend tidak perlu mengubah nama properti
     const [rows] = await db.query(
       `SELECT 
-        pm.id, 
-        pm.project_id, 
-        pm.user_id, 
-        pm.role_in_project AS role, 
-        pm.created_at, 
-        u.name, 
-        u.email 
+         pm.id, 
+         pm.project_id, 
+         pm.user_id, 
+         pm.role_in_project AS role, 
+         pm.created_at, 
+         u.name, 
+         u.email 
        FROM tbr_project_members pm
        JOIN tbr_users u ON pm.user_id = u.id 
        WHERE pm.project_id = ?
@@ -140,7 +152,7 @@ exports.updateTeamMember = async (req, res) => {
 
     const cleanRole = role ? String(role).replace(/\s+/g, '').toLowerCase().trim() : 'teamdeveloper';
 
-    // 🔧 FIX: Update langsung pada kolom role_in_project di tabel persimpangan
+    // Update langsung pada kolom role_in_project di tabel persimpangan
     await db.query(
       `UPDATE tbr_project_members SET role_in_project = ? WHERE id = ?`,
       [cleanRole, memberId]
@@ -200,9 +212,17 @@ exports.getWorkspaceUsers = async (req, res) => {
       return res.status(403).json({ success: false, message: "Akun Anda tidak terhubung ke workspace manapun." });
     }
 
-    // Mengambil semua user yang berada di bawah naungan tenant_id yang sama
+    // ✅ FIX: Ambil data user bersandarkan tabel pivot tbr_tenant_users, bukan filter kolom statis tbr_users.tenant_id
     const [users] = await db.query(
-      `SELECT id, name, email, role FROM tbr_users WHERE tenant_id = ? ORDER BY name ASC`,
+      `SELECT 
+         u.id, 
+         u.name, 
+         u.email, 
+         tu.role 
+       FROM tbr_tenant_users tu
+       JOIN tbr_users u ON tu.user_id = u.id
+       WHERE tu.tenant_id = ? 
+       ORDER BY u.name ASC`,
       [tenantId]
     );
 

@@ -31,7 +31,7 @@ router.post('/invitations', verifyToken, requireAdmin, invitationController.invi
  */
 router.get('/billing/status', verifyToken, requireAdmin, async (req, res) => {
   try {
-    const tenantId = req.user.tenant_id;
+    const tenantId = req.user?.tenant_id;
 
     if (!tenantId) {
       return res.status(400).json({
@@ -65,29 +65,32 @@ router.get('/billing/status', verifyToken, requireAdmin, async (req, res) => {
       [tenantId]
     );
 
-    // c. Hitung jumlah anggota tim internal yang terdaftar dalam tenant ini
+    // c. ✅ FIX MULTI-TENANT: Hitung jumlah anggota via tabel pivot tbr_tenant_users
     const [teamCount] = await db.query(
-      'SELECT COUNT(*) as total FROM tbr_users WHERE tenant_id = ?', 
+      'SELECT COUNT(*) as total FROM tbr_tenant_users WHERE tenant_id = ?', 
       [tenantId]
     );
 
     // d. Logika Hard-Limit Kuota Fitur Berbasis Tingkatan Paket (Package Tier)
-    let projectLimit = 3;  // Default Paket FREE: maksimal 3 proyek
+    // 🔧 FIX: Disesuaikan dengan limit yang dijanjikan pada halaman pricing & billingController
+    let projectLimit = 1;  // Default Paket FREE: maksimal 1 proyek
     let teamLimit = 5;     // Default Paket FREE: maksimal 5 anggota tim
 
-    if (tenant.package_type === 'PRO') {
+    const packageUpper = (tenant.package_type || 'FREE').toUpperCase();
+
+    if (packageUpper === 'PRO') {
       projectLimit = 15;
-      teamLimit = 30;
-    } else if (tenant.package_type === 'ENTERPRISE') {
-      projectLimit = 0; // Angka 0 akan dibaca sebagai tak terbatas (∞) oleh logika frontend Anda
-      teamLimit = 0;
+      teamLimit = 20;
+    } else if (packageUpper === 'ENTERPRISE') {
+      projectLimit = null; // null menyatakan tak terbatas (∞) agar sinkron dengan data controller
+      teamLimit = null;
     }
 
     // e. Kirim data dengan struktur properti yang tepat sesuai kebutuhan state frontend
     return res.status(200).json({
       success: true,
       data: {
-        package_type: tenant.package_type || 'FREE',
+        package_type: packageUpper,
         remaining_days: tenant.remaining_days < 0 ? 0 : tenant.remaining_days,
         project_used: projectCount[0].total,
         project_limit: projectLimit,

@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import api from '../api/axios';
 
 const AuthContext = createContext();
 
@@ -58,24 +59,59 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
     }, []);
 
+    // 💡 PENAMBAHAN: Fungsi untuk update state user secara instan dari komponen eksternal (seperti Payment)
+    const updateUserDirectly = useCallback((newUserData) => {
+        if (!newUserData) return;
+        localStorage.setItem('user', JSON.stringify(newUserData));
+        setUser(newUserData);
+    }, []);
+
+    // 🔄 FIX: Fungsi sinkronisasi data user dari server menggunakan custom instance 'api'
+    const refreshUser = useCallback(async () => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) return null;
+
+            const response = await api.get('/auth/me');
+
+            // Fleksibilitas pengecekan response struktur data backend
+            if (response.data) {
+                const freshUserData = response.data.user || response.data.data || response.data;
+
+                if (freshUserData) {
+                    localStorage.setItem('user', JSON.stringify(freshUserData));
+                    setUser(freshUserData);
+                    console.log("Sesi user berhasil disinkronkan via Custom Instance:", freshUserData.package_type);
+                    return freshUserData;
+                }
+            }
+        } catch (error) {
+            console.error("Gagal menyegarkan data user dari server:", error);
+            if (error.response && error.response.status === 401) {
+                logout();
+            }
+        }
+        return null;
+    }, [logout]);
+
     const switchWorkspace = (tenantId) => {
         if (!user || !user.workspaces) return;
         const selected = user.workspaces.find(ws => ws.tenant_id === Number(tenantId));
-        
+
         if (selected) {
             const updatedUser = {
                 ...user,
                 tenant_id: selected.tenant_id,
                 role: selected.role,
-                package_type: selected.package_type,
+                package_type: selected.package_type || user.package_type, // Fallback ke user level jika workspace kosong
                 billing_cycle: selected.billing_cycle,
-                subscription_status: selected.tenant_status,
+                subscription_status: selected.tenant_status || selected.subscription_status,
                 trial_end: selected.trial_end
             };
             localStorage.setItem('user', JSON.stringify(updatedUser));
             setUser(updatedUser);
-            
-            // Reload halaman untuk mereset semua state aplikasi (cara paling aman)
+
+            // Reload halaman untuk mereset seluruh state aplikasi (cara paling aman)
             window.location.href = '/dashboard';
         }
     };
@@ -88,7 +124,9 @@ export const AuthProvider = ({ children }) => {
     const isSubscriptionActive = () => {
         if (!user) return false;
         if (user.role === 'superadmin') return true;
-        return user.subscription_status === 'active';
+
+        // Cek toleransi status jika backend mengirimkan 'active' atau data subscription valid
+        return user.subscription_status === 'active' || user.package_type === 'PRO';
     };
 
     return (
@@ -97,6 +135,8 @@ export const AuthProvider = ({ children }) => {
             loading,
             login,
             logout,
+            refreshUser,
+            updateUserDirectly, // Di-export agar bisa dipakai di Payment.jsx
             switchWorkspace,
             hasRole,
             isSubscriptionActive,

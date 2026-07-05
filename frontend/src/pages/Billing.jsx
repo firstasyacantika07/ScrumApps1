@@ -23,7 +23,10 @@ const Billing = () => {
   const [loadingTrial, setLoadingTrial] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
 
-  // State Subscription terintegrasi dengan field database tbr_users
+  // State baru untuk melacak pilihan siklus tagihan (Bulanan / Tahunan)
+  const [isYearly, setIsYearly] = useState(false);
+
+  // State Subscription terintegrasi dengan field database
   const [subscription, setSubscription] = useState({
     plan: 'FREE',
     status: 'ACTIVE',
@@ -34,7 +37,7 @@ const Billing = () => {
     expiredSubscription: false,
     paymentMethod: 'Midtrans',
     totalSpent: 0,
-    remainingDays: 0, // Pindahkan kalkulasi sisa hari ke dalam state
+    remainingDays: 0,
   });
 
   const [plans, setPlans] = useState([]);
@@ -56,16 +59,13 @@ const Billing = () => {
       const userStatus = (user.subscription_status || 'ACTIVE').toUpperCase();
       const userCycle = (user.billing_cycle || 'NONE').toUpperCase();
 
-      // SINKRONISASI DATABASE: Menggunakan user.trial_end atau user.subscription_ends_at
       const targetEndDate = user.trial_end || user.subscription_ends_at || null;
 
-      // Cek kedaluwarsa secara realtime
       const isTrialExpired = !!user.expired_trial || (targetEndDate && new Date(targetEndDate) < new Date() && userCycle === 'TRIAL');
       const isSubExpired = !!user.expired_subscription || (targetEndDate && new Date(targetEndDate) < new Date() && userPlan !== 'FREE' && userCycle !== 'TRIAL');
-      
+
       const isGlobalExpired = userStatus === 'EXPIRED' || isTrialExpired || isSubExpired;
 
-      // Hitung sisa hari secara aman di sini
       let daysLeft = 0;
       if (targetEndDate) {
         const targetDate = new Date(targetEndDate);
@@ -89,7 +89,7 @@ const Billing = () => {
     } catch (err) {
       console.error("Gagal memuat profil pengguna:", err);
     } finally {
-      setLoadingProfile(false); // Perbaikan: Langsung eksekusi tanpa short-circuit evaluasi cond
+      setLoadingProfile(false);
     }
   };
 
@@ -109,7 +109,7 @@ const Billing = () => {
 
         const formattedPlans = plansData.map((plan) => {
           const planId = Number(plan.id);
-          
+
           let currentIcon = Crown;
           if (plan.name === 'FREE') currentIcon = Lock;
           if (plan.name === 'ENTERPRISE') currentIcon = Rocket;
@@ -141,7 +141,6 @@ const Billing = () => {
             dynamicFeatures.push({ icon: GitBranch, text: 'Integrasi GitHub' });
           }
 
-          // Aturan tombol disable paket saat ini
           let isButtonDisabled = plan.name === currentSubPlan;
           if (currentSubPlan === 'PRO' && subscription.status !== 'EXPIRED' && plan.name === 'FREE') {
             isButtonDisabled = true;
@@ -184,7 +183,7 @@ const Billing = () => {
       setLoadingTrial(true);
       const res = await api.post('/payment/start-trial');
       alert(res.data?.message || "Trial PRO aktif selama 7 hari");
-      loadProfile(); 
+      loadProfile();
     } catch (err) {
       console.error("Trial Activation Error:", err);
       alert(err.response?.data?.message || "Gagal mengaktifkan Trial.");
@@ -196,7 +195,7 @@ const Billing = () => {
   const handleBuyPlan = async (plan, cycle = 'MONTHLY') => {
     try {
       if (Number(plan.id) === 3) {
-        alert('Silakan hubungi sales untuk migrasi ke paket Enterprise.');
+        navigate('/info'); // 🚀 Redirect ke halaman info jika memilih Enterprise
         return;
       }
       if (Number(plan.id) === 1) return;
@@ -206,7 +205,7 @@ const Billing = () => {
       const res = await api.post('/payment/create-transaction', {
         planId: Number(plan.id),
         planName: plan.name,
-        billingCycle: cycle, // Menggunakan cycle dinamis jika ke depan ditambahkan opsi tahunan
+        billingCycle: cycle,
       });
 
       const data = res.data;
@@ -217,7 +216,7 @@ const Billing = () => {
 
       navigate('/payment', {
         state: {
-          snapToken: data.token, 
+          snapToken: data.token,
           redirectUrl: data.redirect_url,
           orderId: data.order_id,
           planName: plan.name,
@@ -235,14 +234,14 @@ const Billing = () => {
 
   const handleSelectPlan = (plan) => {
     if (Number(plan.id) === 3) {
-      alert('Silakan hubungi sales untuk migrasi ke paket Enterprise.');
+      navigate('/info'); // 🚀 Redirect ke halaman info jika mengklik Enterprise
       return;
     }
     if (Number(plan.id) === 1) {
       alert('Anda sudah berada di paket FREE.');
       return;
     }
-    handleBuyPlan(plan, 'MONTHLY');
+    handleBuyPlan(plan, isYearly ? 'YEARLY' : 'MONTHLY');
   };
 
   const formatRupiah = (value) => {
@@ -277,7 +276,7 @@ const Billing = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
-      
+
       {/* 🚨 NOTIFICATION BANNER (Hanya Muncul Jika Expired) */}
       {subscription.status === 'EXPIRED' && (
         <div className="bg-red-600 text-white px-4 py-3 shadow-md border-b border-red-700 animate-fadeIn">
@@ -287,9 +286,9 @@ const Billing = () => {
                 <AlertTriangle size={20} className="text-white animate-pulse" />
               </div>
               <p className="text-sm font-bold tracking-wide">
-                {subscription.expiredTrial 
-                  ? "Masa uji coba (Trial 7 Hari) PRO Anda telah berakhir!" 
-                  : `Masa aktif paket ${subscription.plan} Anda telah kedaluwarsa pada ${formatLocalDate(subscription.endDate)}!`} 
+                {subscription.expiredTrial
+                  ? "Masa uji coba (Trial 7 Hari) PRO Anda telah berakhir!"
+                  : `Masa aktif paket ${subscription.plan} Anda telah kedaluwarsa pada ${formatLocalDate(subscription.endDate)}!`}
                 {" "}Sistem membatasi akses fitur premium sampai Anda memperbarui paket.
               </p>
             </div>
@@ -306,7 +305,7 @@ const Billing = () => {
 
       {/* CONTENT INNER CONTAINER */}
       <div className="p-5 lg:p-8 max-w-7xl mx-auto mt-4">
-        
+
         {/* HEADER */}
         <div className="mb-12">
           <div className="inline-flex items-center gap-2 bg-red-50 text-red-600 px-4 py-2 rounded-full text-sm font-bold mb-5">
@@ -321,9 +320,9 @@ const Billing = () => {
           </p>
         </div>
 
-        {/* CURRENT PLAN BOX */}
-        <div className="grid lg:grid-cols-3 gap-8 mb-12">
-          <div className="lg:col-span-2 bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
+        {/* CURRENT PLAN BOX (✅ Diubah menjadi 1 kolom penuh, card spending dihapus) */}
+        <div className="w-full mb-12">
+          <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
               <div className="flex items-start gap-5">
                 <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center shadow-lg shrink-0">
@@ -334,21 +333,20 @@ const Billing = () => {
                     {subscription.plan} {subscription.billingCycle === 'TRIAL' && subscription.status !== 'EXPIRED' && '(PRO TRIAL)'}
                   </h2>
                   <p className="text-slate-500 mt-2">
-                    {subscription.status === 'TRIALING' 
-                      ? `Masa uji coba aktif. Berakhir dalam ${subscription.remainingDays} hari lagi.` 
-                      : subscription.status === 'EXPIRED' 
-                      ? "Akses Premium Terputus. Silakan lakukan pembayaran ulang untuk mengaktifkan kembali." 
-                      : "Paket aktif saat ini."}
+                    {subscription.status === 'TRIALING'
+                      ? `Masa uji coba aktif. Berakhir dalam ${subscription.remainingDays} hari lagi.`
+                      : subscription.status === 'EXPIRED'
+                        ? "Akses Premium Terputus. Silakan lakukan pembayaran ulang untuk mengaktifkan kembali."
+                        : "Paket aktif saat ini."}
                   </p>
                   <div className="flex flex-wrap items-center gap-3 mt-5">
-                    <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wide ${
-                      subscription.status === 'EXPIRED' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
-                    }`}>
+                    <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wide ${subscription.status === 'EXPIRED' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                      }`}>
                       {subscription.status}
                     </span>
                     {subscription.status !== 'EXPIRED' && subscription.endDate && (
                       <span className="text-xs font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-3 py-1 rounded-md">
-                        Selesai pada: {formatLocalDate(subscription.endDate)}
+                        Selesai pada: {formatLocalDate(subscription.endDate)} ({subscription.billingCycle})
                       </span>
                     )}
                   </div>
@@ -377,22 +375,28 @@ const Billing = () => {
               </div>
             </div>
           </div>
-
-          {/* SPENDING BOX */}
-          <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-40 h-40 bg-red-500/10 rounded-full blur-3xl" />
-            <div className="relative z-10">
-              <p className="text-slate-400 text-sm uppercase font-bold tracking-wide">Total Spending</p>
-              <h2 className="text-4xl font-black mt-4">{formatRupiah(subscription.totalSpent)}</h2>
-            </div>
-          </div>
         </div>
 
         {/* PLANS GRID */}
         <div id="plans">
-          <div className="mb-12 text-center">
+          <div className="mb-6 text-center">
             <h2 className="text-4xl font-black text-slate-900 mb-3">Pilih Paket Terbaik</h2>
             <p className="text-slate-500 text-lg">Nikmati skalabilitas manajemen tanpa batas rintangan.</p>
+          </div>
+
+          {/* 🔄 TOGGLE SWITCH MONTHLY / YEARLY */}
+          <div className="flex items-center justify-center gap-4 mb-12">
+            <span className={`text-sm font-bold ${!isYearly ? "text-red-500" : "text-slate-400"}`}>Bulanan</span>
+            <button
+              type="button"
+              onClick={() => setIsYearly(!isYearly)}
+              className="w-14 h-8 bg-slate-200 rounded-full p-1 transition-colors duration-300 focus:outline-none"
+            >
+              <div className={`w-6 h-6 bg-red-500 rounded-full transition-transform duration-300 ${isYearly ? "translate-x-6 bg-emerald-500" : ""}`} />
+            </button>
+            <span className={`text-sm font-bold ${isYearly ? "text-emerald-600" : "text-slate-400"}`}>
+              Tahunan <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full ml-1 font-black">Hemat hingga 15%</span>
+            </span>
           </div>
 
           <div className="grid lg:grid-cols-3 gap-8 items-stretch">
@@ -403,11 +407,10 @@ const Billing = () => {
               return (
                 <div
                   key={plan.id || index}
-                  className={`relative bg-white rounded-3xl p-8 border transition-all duration-300 hover:-translate-y-2 flex flex-col justify-between ${
-                    plan.popular
-                      ? 'border-red-500 shadow-2xl shadow-red-100 lg:scale-105 z-10'
-                      : 'border-slate-200 shadow-sm'
-                  }`}
+                  className={`relative bg-white rounded-3xl p-8 border transition-all duration-300 hover:-translate-y-2 flex flex-col justify-between ${plan.popular
+                    ? 'border-red-500 shadow-2xl shadow-red-100 lg:scale-105 z-10'
+                    : 'border-slate-200 shadow-sm'
+                    }`}
                 >
                   {plan.popular && (
                     <div className="absolute -top-3.5 left-1/2 transform -translate-x-1/2 bg-red-500 text-white text-[10px] font-black px-4 py-1 rounded-full uppercase tracking-wider shadow-sm">
@@ -416,25 +419,25 @@ const Billing = () => {
                   )}
 
                   <div>
-                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-6 ${
-                      plan.popular ? 'bg-gradient-to-br from-red-500 to-orange-500 text-white' : 'bg-slate-100 text-slate-700'
-                    }`}>
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-6 ${plan.popular ? 'bg-gradient-to-br from-red-500 to-orange-500 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}>
                       <CurrentIcon size={26} />
                     </div>
 
                     <h3 className="text-2xl font-black text-slate-900">{plan.name} PLAN</h3>
                     <p className="text-slate-500 mt-2 text-sm leading-relaxed min-h-[52px]">{plan.description}</p>
 
-                    {/* PRICING AREA */}
+                    {/* PRICING AREA (Dinamis mengikuti State Switch) */}
                     <div className="mt-6 mb-6">
                       {isProPlanCard ? (
-                        <>
-                          <div className="flex items-end gap-1">
-                            <span className="text-4xl font-black text-slate-900">{formatRupiah(plan.monthlyPrice)}</span>
-                            <span className="text-slate-400 mb-1 text-sm font-medium">/bulan</span>
-                          </div>
-                          <p className="text-sm text-slate-500 mt-2">{formatRupiah(plan.yearlyPrice)} /tahun</p>
-                        </>
+                        <div className="flex items-end gap-1">
+                          <span className="text-4xl font-black text-slate-900">
+                            {isYearly ? formatRupiah(plan.yearlyPrice) : formatRupiah(plan.monthlyPrice)}
+                          </span>
+                          <span className="text-slate-400 mb-1 text-sm font-medium">
+                            {isYearly ? '/tahun' : '/bulan'}
+                          </span>
+                        </div>
                       ) : (
                         <div className="text-4xl font-black text-slate-900">
                           {Number(plan.id) === 1 ? 'Gratis' : 'Custom'}
@@ -445,7 +448,7 @@ const Billing = () => {
                     {/* LIST FEATURES */}
                     <div className="space-y-4 mb-8 border-t border-slate-100 pt-5">
                       {plan.features?.map((feature, idx) => {
-                        const FeatureIcon = feature.icon || ShieldCheck; 
+                        const FeatureIcon = feature.icon || ShieldCheck;
                         return (
                           <div key={idx} className="flex items-start gap-3">
                             <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
@@ -479,12 +482,11 @@ const Billing = () => {
                       <button
                         type="button"
                         disabled={subscription.plan === 'PRO' && subscription.status !== 'EXPIRED'}
-                        onClick={() => handleBuyPlan(plan, 'MONTHLY')}
-                        className={`w-full h-12 rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 ${
-                          subscription.plan === 'PRO' && subscription.status !== 'EXPIRED'
-                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                            : 'bg-red-500 hover:bg-red-600 text-white shadow-md'
-                        }`}
+                        onClick={() => handleBuyPlan(plan, isYearly ? 'YEARLY' : 'MONTHLY')}
+                        className={`w-full h-12 rounded-xl font-bold transition-all text-sm flex items-center justify-center gap-2 ${subscription.plan === 'PRO' && subscription.status !== 'EXPIRED'
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          : 'bg-red-500 hover:bg-red-600 text-white shadow-md'
+                          }`}
                       >
                         {loadingPlan === plan.id ? (
                           <Loader2 size={16} className="animate-spin" />
@@ -497,19 +499,18 @@ const Billing = () => {
                       </button>
                     </div>
                   ) : (
-                    /* STANDAR BUTTON (Untuk Paket FREE & ENTERPRISE) */
+                    /* STANDAR BUTTON (Untuk Paket FREE & ENTERPRISE + Redirect Info) */
                     <button
                       type="button"
-                      disabled={plan.disabled || loadingPlan === plan.id}
+                      disabled={(plan.name === subscription.plan && subscription.status !== 'EXPIRED')}
                       onClick={() => handleSelectPlan(plan)}
-                      className={`w-full h-14 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm ${
-                        plan.disabled
-                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
-                      }`}
+                      className={`w-full h-14 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm ${(plan.name === subscription.plan && subscription.status !== 'EXPIRED')
+                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                        }`}
                     >
                       {plan.name === subscription.plan && subscription.status !== 'EXPIRED' ? 'Paket Saat Ini' : plan.buttonText}
-                      {!plan.disabled && <ArrowRight size={16} />}
+                      {!(plan.name === subscription.plan && subscription.status !== 'EXPIRED') && <ArrowRight size={16} />}
                     </button>
                   )}
 

@@ -9,7 +9,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  
+
   const [formData, setFormData] = useState({
     name: '',
     vision: '',
@@ -77,7 +77,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
     }
     try {
       if (editingId) {
-        await api.put(`/projects/vision-boards/${editingId}`, formData);
+        await api.put(`/projects/${projectId}/vision-boards/${editingId}`, formData);
       } else {
         await api.post(`/projects/${projectId}/vision-boards`, formData);
       }
@@ -96,7 +96,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
     }
     if (!window.confirm('Delete this vision board?')) return;
     try {
-      await api.delete(`/projects/vision-boards/${id}`);
+      await api.delete(`/projects/${projectId}/vision-boards/${id}`);
       fetchVisions();
     } catch (err) {
       alert("Error deleting vision board");
@@ -147,7 +147,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
               {/* Header Card */}
               <div className="bg-slate-50/70 px-8 py-4 flex justify-between items-center border-b border-slate-100">
                 <h3 className="font-black text-slate-700 uppercase tracking-tighter text-lg">{item.name}</h3>
-                
+
                 {(hasWriteAccess || hasDeleteAccess) && (
                   <div className="flex gap-2">
                     {hasWriteAccess && (
@@ -167,27 +167,27 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
               {/* Grid Content */}
               <div className="grid md:grid-cols-4 gap-px bg-slate-100">
                 <div className="bg-white p-6 col-span-2">
-                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><Target size={14} className="text-red-500"/> Vision</label>
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><Target size={14} className="text-red-500" /> Vision</label>
                   <p className="text-slate-600 text-sm leading-relaxed whitespace-pre-line">{item.vision || '-'}</p>
                 </div>
                 <div className="bg-white p-6">
-                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><Users size={14} className="text-blue-500"/> Target Group</label>
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><Users size={14} className="text-blue-500" /> Target Group</label>
                   <p className="text-slate-600 text-sm whitespace-pre-line">{item.target_group || '-'}</p>
                 </div>
                 <div className="bg-white p-6">
-                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShoppingBag size={14} className="text-emerald-500"/> Needs</label>
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShoppingBag size={14} className="text-emerald-500" /> Needs</label>
                   <p className="text-slate-600 text-sm whitespace-pre-line">{item.needs || '-'}</p>
                 </div>
                 <div className="bg-white p-6">
-                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShoppingBag size={14} className="text-orange-500"/> Products</label>
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShoppingBag size={14} className="text-orange-500" /> Products</label>
                   <p className="text-slate-600 text-sm whitespace-pre-line">{item.products || '-'}</p>
                 </div>
                 <div className="bg-white p-6 col-span-2">
-                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><BarChart3 size={14} className="text-purple-500"/> Business Goals</label>
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><BarChart3 size={14} className="text-purple-500" /> Business Goals</label>
                   <p className="text-slate-600 text-sm whitespace-pre-line">{item.business_goals || '-'}</p>
                 </div>
                 <div className="bg-white p-6 col-span-2">
-                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShieldAlert size={14} className="text-amber-500"/> Competitors</label>
+                  <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase mb-3"><ShieldAlert size={14} className="text-amber-500" /> Competitors</label>
                   <p className="text-slate-600 text-sm whitespace-pre-line">{item.competitors || '-'}</p>
                 </div>
               </div>
@@ -206,17 +206,17 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
                 required
                 placeholder="Versi 1.0"
                 value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 className="w-full p-3 bg-slate-50 border rounded-2xl focus:ring-2 focus:ring-red-500 outline-none transition-all mt-1 text-sm"
               />
             </div>
-            
+
             <div className="grid md:grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase">Vision</label>
                 <textarea
                   value={formData.vision}
-                  onChange={(e) => setFormData({...formData, vision: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, vision: e.target.value })}
                   className="w-full p-3 bg-slate-50 border rounded-2xl h-24 mt-1 text-sm focus:outline-none focus:border-red-500"
                 />
               </div>
@@ -224,7 +224,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
                 <label className="text-[10px] font-black text-slate-400 uppercase">Target Group</label>
                 <textarea
                   value={formData.target_group}
-                  onChange={(e) => setFormData({...formData, target_group: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, target_group: e.target.value })}
                   className="w-full p-3 bg-slate-50 border rounded-2xl h-24 mt-1 text-sm focus:outline-none focus:border-red-500"
                 />
               </div>
@@ -232,7 +232,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
                 <label className="text-[10px] font-black text-slate-400 uppercase">Needs</label>
                 <textarea
                   value={formData.needs}
-                  onChange={(e) => setFormData({...formData, needs: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, needs: e.target.value })}
                   className="w-full p-3 bg-slate-50 border rounded-2xl h-24 mt-1 text-sm focus:outline-none focus:border-red-500"
                 />
               </div>
@@ -240,7 +240,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
                 <label className="text-[10px] font-black text-slate-400 uppercase">Products</label>
                 <textarea
                   value={formData.products}
-                  onChange={(e) => setFormData({...formData, products: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, products: e.target.value })}
                   className="w-full p-3 bg-slate-50 border rounded-2xl h-24 mt-1 text-sm focus:outline-none focus:border-red-500"
                 />
               </div>
@@ -248,7 +248,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
                 <label className="text-[10px] font-black text-slate-400 uppercase">Competitors</label>
                 <textarea
                   value={formData.competitors}
-                  onChange={(e) => setFormData({...formData, competitors: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, competitors: e.target.value })}
                   className="w-full p-3 bg-slate-50 border rounded-2xl h-24 mt-1 text-sm focus:outline-none focus:border-red-500"
                 />
               </div>
@@ -256,7 +256,7 @@ const VisionBoard = forwardRef(({ projectId, currentRole }, ref) => {
                 <label className="text-[10px] font-black text-slate-400 uppercase">Business Goals</label>
                 <textarea
                   value={formData.business_goals}
-                  onChange={(e) => setFormData({...formData, business_goals: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, business_goals: e.target.value })}
                   className="w-full p-3 bg-slate-50 border rounded-2xl h-24 mt-1 text-sm focus:outline-none focus:border-red-500"
                 />
               </div>

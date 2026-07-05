@@ -30,15 +30,6 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
 
   const [selectedMember, setSelectedMember] = useState(null);
 
-  // 🛠️ FIX: sebelumnya SEMUA data currentUser (role & id) diambil langsung
-  // dari localStorage secara terpisah, padahal ProjectDetail.jsx sudah
-  // mengirim currentRole & currentUserId lewat prop (hasil fetch fresh dari
-  // /auth/me — sama seperti yang dipakai Backlog.jsx, Sprint.jsx, dll).
-  // Kalau localStorage basi/kosong/beda struktur, role bisa jatuh ke default
-  // 'GUEST' walau sebenarnya sedang login sebagai Admin, sehingga tombol
-  // Add/Edit/Delete hilang. Sekarang prop diprioritaskan, localStorage hanya
-  // fallback kalau prop tidak dikirim (jaga-jaga dipakai di tempat lain tanpa
-  // prop ini).
   const localUser = JSON.parse(localStorage.getItem('user')) || {};
   const currentUser = {
     id: currentUserId ?? localUser.id,
@@ -52,23 +43,19 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
 
   /* =====================================================
       FETCH DATA
-   ===================================================== */
-  const [fetchError, setFetchError] = useState(''); // 🛠️ FIX: state error khusus fetch list, sebelumnya tidak ada sehingga error 500/network diam-diam jadi "list kosong"
+     ===================================================== */
+  const [fetchError, setFetchError] = useState('');
 
   const fetchMembers = async () => {
     try {
       setLoading(true);
       setFetchError('');
       const res = await api.get(`/projects/${projectId}/members`);
-      
-      // Amankan jika API membungkus data di dalam objek `.data` atau langsung Array
       const memberData = Array.isArray(res.data) ? res.data : (res.data?.data || []);
       setMembers(memberData);
     } catch (err) {
       console.error('GET MEMBERS ERROR:', err.response?.data || err.message);
-      setMembers([]); // Fallback ke array kosong jika error
-      // 🛠️ FIX: tampilkan pesan error ke user, bukan cuma console.error,
-      // supaya "list kosong karena error" tidak disalahartikan sebagai "memang belum ada member"
+      setMembers([]);
       setFetchError(
         err.response?.data?.message || 'Gagal memuat daftar member. Periksa koneksi atau coba lagi.'
       );
@@ -80,13 +67,11 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
   const fetchUsers = async () => {
     try {
       const res = await api.get('/users');
-      
-      // Amankan penentuan Array: cek res.data langsung atau res.data.data
       const userData = Array.isArray(res.data) ? res.data : (res.data?.data || []);
       setUsers(userData);
     } catch (err) {
       console.error('GET USERS ERROR:', err.response?.data || err.message);
-      setUsers([]); // Fallback ke array kosong jika error
+      setUsers([]);
     }
   };
 
@@ -97,20 +82,16 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
 
   /* =====================================================
       FILTER USERS (Mencegah Duplikasi Anggota)
-   ===================================================== */
-  // Hanya tampilkan user yang belum menjadi member di project ini
+     ===================================================== */
   const availableUsers = useMemo(() => {
-    // Defense programming: pastikan users dan members valid berbentuk Array sebelum diproses
     if (!Array.isArray(users)) return [];
     const safeMembers = Array.isArray(members) ? members : [];
-
     return users.filter(user => !safeMembers.some(member => member.user_id === user.id));
   }, [users, members]);
 
-
   /* =====================================================
       RESET FORM
-  ===================================================== */
+    ===================================================== */
   const resetForm = () => {
     setFormData({
       user_id: '',
@@ -122,7 +103,7 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
 
   /* =====================================================
       HANDLERS (ADD, EDIT, DELETE)
-  ===================================================== */
+    ===================================================== */
   const handleAddMember = async (e) => {
     e.preventDefault();
     setErrorMsg(''); 
@@ -148,7 +129,7 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
 
     try {
       await api.put(`/projects/${projectId}/members/${selectedMember.id}`, {
-        role: formData.role // Hanya kirim payload role saat melakukan edit
+        role: formData.role
       });
       setIsEditModalOpen(false);
       resetForm();
@@ -165,11 +146,6 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
       await api.delete(`/projects/${projectId}/members/${selectedMember.id}`);
       setIsDeleteModalOpen(false);
       resetForm();
-      // 🛠️ FIX: kalau user menghapus dirinya sendiri dari project, dia sudah
-      // tidak punya akses lagi ke project ini — fetchMembers() akan gagal
-      // (403) karena backend memvalidasi keanggotaan/tenant. Alihkan balik
-      // ke daftar project alih-alih coba fetch ulang halaman yang sudah
-      // tidak bisa diaksesnya.
       if (wasSelf) {
         navigate('/projects');
         return;
@@ -196,7 +172,7 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
 
   /* =====================================================
       UI RENDER STYLES
-  ===================================================== */
+     ===================================================== */
   const roleBadge = (role) => {
     switch (role) {
       case 'ProjectOwner': return 'bg-purple-100 text-purple-700';
@@ -209,20 +185,14 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
 
   const roleIcon = (role) => {
     switch (role) {
-      case 'ProjectOwner': return <Briefcase size={14} />;
-      case 'Superadmin': return <Shield size={14} />;
-      case 'BusinessAnalyst': return <UserCircle size={14} />;
-      case 'TeamDeveloper': return <Code2 size={14} />;
-      default: return <UserCircle size={14} />;
+      case 'ProjectOwner': return <Briefcase size={13} />;
+      case 'Superadmin': return <Shield size={13} />;
+      case 'BusinessAnalyst': return <UserCircle size={13} />;
+      case 'TeamDeveloper': return <Code2 size={13} />;
+      default: return <UserCircle size={13} />;
     }
   };
 
-  // 🛠️ FIX: sebelumnya hanya role 'Superadmin' (persis, case-sensitive) yang
-  // bisa mengelola member, sehingga tombol Add/Edit/Delete tidak pernah muncul
-  // untuk user dengan role 'Admin' — padahal backend (projectRoutes.js)
-  // sudah mengizinkan authorize(['superadmin', 'admin']) untuk endpoint ini.
-  // Disamakan dengan backend + dibuat case-insensitive supaya tidak rapuh
-  // terhadap variasi penulisan role ('Admin', 'admin', 'ADMIN', dst).
   const currentRoleLower = currentUser?.role?.toString().toLowerCase() || '';
   const canManageMember = ['superadmin', 'admin'].includes(currentRoleLower);
 
@@ -246,7 +216,7 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
               resetForm();
               setIsAddModalOpen(true);
             }}
-            className="bg-red-500 hover:bg-red-600 text-white px-5 py-3 rounded-2xl flex items-center gap-2 font-semibold transition-colors"
+            className="bg-red-500 hover:bg-red-600 text-white px-5 py-3 rounded-2xl flex items-center gap-2 font-semibold transition-colors shadow-sm"
           >
             <Plus size={18} />
             Add Member
@@ -254,11 +224,10 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
         )}
       </div>
 
-      {/* MEMBER LIST */}
+      {/* MEMBER LIST - CLEAN LIST VIEW */}
       {loading ? (
         <div className="text-center py-20 text-gray-400">Loading members...</div>
       ) : fetchError ? (
-        // 🛠️ FIX: state error eksplisit, sebelumnya error fetch tidak pernah ditampilkan ke user
         <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
           <AlertCircle size={28} className="text-red-400" />
           <p className="text-sm font-semibold text-red-500">{fetchError}</p>
@@ -272,58 +241,69 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
       ) : members.length === 0 ? (
         <div className="text-center py-20 text-gray-400 text-sm">Belum ada member di project ini.</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        /* Pembungkus utama list vertikal */
+        <div className="flex flex-col gap-3 w-full">
           {members.map((member) => {
-            // Cek apakah data kartu ini merupakan akun user yang sedang aktif log-in
             const isSelf = member.user_id === currentUser.id;
 
             return (
-              <div key={member.id} className="bg-white border border-gray-100 rounded-3xl p-6 shadow-sm">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="w-16 h-16 rounded-full bg-red-500 text-white flex items-center justify-center text-xl font-bold">
-                      {member.name?.charAt(0)}
-                    </div>
-                    <h3 className="font-bold text-lg text-gray-800 mt-4">
-                      {member.name} {isSelf && <span className="text-xs font-normal text-gray-400 ml-1">(Anda)</span>}
-                    </h3>
-                    <div className="flex items-center gap-2 text-sm text-gray-400 mt-2">
-                      <Mail size={14} />
-                      {member.email}
-                    </div>
-                    <div className={`inline-flex items-center gap-2 mt-4 px-3 py-1 rounded-full text-xs font-bold ${roleBadge(member.role)}`}>
-                      {roleIcon(member.role)}
-                      {member.role}
-                    </div>
+              <div 
+                key={member.id} 
+                className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-all gap-4 w-full"
+              >
+                {/* SISI KIRI: Profil Utama (Avatar + Info Nama & Tombol Aksi) */}
+                <div className="flex items-center gap-4 flex-1 min-w-0">
+                  {/* Avatar Bulat */}
+                  <div className="w-10 h-10 rounded-full bg-red-500 text-white flex items-center justify-center text-sm font-bold shadow-sm shrink-0">
+                    {member.name?.charAt(0)}
+                  </div>
+                  
+                  {/* Blok Nama dan Tombol yang sejajar rapat kiri */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="font-bold text-gray-800 truncate">
+                      {member.name}{' '}
+                      {isSelf && <span className="text-xs font-normal text-gray-400 ml-1 bg-gray-100 px-1.5 py-0.5 rounded-md">(Anda)</span>}
+                    </span>
+
+                    {/* TOMBOL AKSI: Digeser ke Kiri, melekat persis setelah Nama */}
+                    {canManageMember && (
+                      <div className="flex items-center gap-1 bg-gray-50 p-1 rounded-xl border border-gray-100 shrink-0">
+                        {!isSelf && (
+                          <button
+                            onClick={() => openEditModal(member)}
+                            className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-100/70 transition-colors"
+                            title="Edit Role"
+                          >
+                            <Edit size={14} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => openDeleteModal(member)}
+                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-100/70 transition-colors"
+                          title={isSelf ? 'Keluar dari project' : 'Hapus dari project'}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* SISI KANAN: Detail Tambahan (Email & Role Badge) */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 text-sm ml-14 md:ml-0">
+                  {/* Email */}
+                  <div className="flex items-center gap-1.5 text-gray-500 min-w-0 sm:min-w-[200px]">
+                    <Mail size={14} className="text-gray-300 shrink-0" />
+                    <span className="truncate">{member.email}</span>
                   </div>
 
-                  {/* 🛠️ FIX: sebelumnya tombol Edit & Delete SAMA-SAMA disembunyikan
-                      untuk kartu diri sendiri (isSelf). Sekarang dipecah:
-                      - Edit role diri sendiri tetap disembunyikan (mencegah user
-                        tidak sengaja mengubah/menaikkan role-nya sendiri).
-                      - Delete (keluar dari project) tetap boleh dilakukan
-                        terhadap diri sendiri, sesuai permintaan. */}
-                  {canManageMember && (
-                    <div className="flex gap-2">
-                      {!isSelf && (
-                        <button
-                          onClick={() => openEditModal(member)}
-                          className="p-2 rounded-xl bg-blue-50 text-blue-500 hover:bg-blue-100 transition-colors"
-                        >
-                          <Edit size={16} />
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => openDeleteModal(member)}
-                        className="p-2 rounded-xl bg-red-50 text-red-500 hover:bg-red-100 transition-colors"
-                        title={isSelf ? 'Keluar dari project ini' : 'Hapus member'}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  )}
+                  {/* Badge Role */}
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold shrink-0 w-fit ${roleBadge(member.role)}`}>
+                    {roleIcon(member.role)}
+                    {member.role}
+                  </span>
                 </div>
+
               </div>
             );
           })}
@@ -331,11 +311,7 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
       )}
 
       {/* ADD MODAL */}
-      <Modal
-        isOpen={isAddModalOpen}
-        onClose={() => { setIsAddModalOpen(false); resetForm(); }}
-        title="Add Member"
-      >
+      <Modal isOpen={isAddModalOpen} onClose={() => { setIsAddModalOpen(false); resetForm(); }} title="Add Member">
         <form onSubmit={handleAddMember} className="space-y-5">
           {errorMsg && (
             <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold flex items-start gap-3 shadow-sm">
@@ -343,7 +319,6 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
               <span>{errorMsg}</span>
             </div>
           )}
-
           <div>
             <label className="text-sm font-semibold">Select User</label>
             <select
@@ -363,7 +338,6 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
               <p className="text-[11px] text-gray-400 mt-1.5 ml-1">Semua user sistem sudah tergabung di proyek ini.</p>
             )}
           </div>
-
           <div>
             <label className="text-sm font-semibold">Role</label>
             <select
@@ -374,25 +348,16 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
               <option value="TeamDeveloper">Team Developer</option>
               <option value="BusinessAnalyst">Business Analyst</option>
               <option value="ProjectOwner">Project Owner</option>
-              <option value="Superadmin">Superadmin</option>
             </select>
           </div>
-
-          <button
-            type="submit"
-            className="w-full bg-red-500 hover:bg-red-600 text-white p-3 rounded-2xl font-bold transition-colors"
-          >
+          <button type="submit" className="w-full bg-red-500 hover:bg-red-600 text-white p-3 rounded-2xl font-bold transition-colors">
             Save Member
           </button>
         </form>
       </Modal>
 
       {/* EDIT MODAL */}
-      <Modal
-        isOpen={isEditModalOpen}
-        onClose={() => { setIsEditModalOpen(false); resetForm(); }}
-        title="Edit Member"
-      >
+      <Modal isOpen={isEditModalOpen} onClose={() => { setIsEditModalOpen(false); resetForm(); }} title="Edit Member">
         <form onSubmit={handleEditMember} className="space-y-5">
           {errorMsg && (
             <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold flex items-start gap-3">
@@ -400,7 +365,6 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
               <span>{errorMsg}</span>
             </div>
           )}
-
           <div>
             <label className="text-sm font-semibold">Role</label>
             <select
@@ -411,25 +375,16 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
               <option value="TeamDeveloper">Team Developer</option>
               <option value="BusinessAnalyst">Business Analyst</option>
               <option value="ProjectOwner">Project Owner</option>
-              <option value="Superadmin">Superadmin</option>
             </select>
           </div>
-
-          <button
-            type="submit"
-            className="w-full bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-2xl font-bold transition-colors"
-          >
+          <button type="submit" className="w-full bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-2xl font-bold transition-colors">
             Update Member
           </button>
         </form>
       </Modal>
 
       {/* DELETE MODAL */}
-      <Modal
-        isOpen={isDeleteModalOpen}
-        onClose={() => { setIsDeleteModalOpen(false); resetForm(); }}
-        title={selectedMember?.user_id === currentUser.id ? "Keluar dari Project" : "Delete Member"}
-      >
+      <Modal isOpen={isDeleteModalOpen} onClose={() => { setIsDeleteModalOpen(false); resetForm(); }} title={selectedMember?.user_id === currentUser.id ? "Keluar dari Project" : "Delete Member"}>
         <div className="space-y-5">
           <p className="text-gray-600">
             {selectedMember?.user_id === currentUser.id
@@ -440,10 +395,7 @@ const Members = ({ projectId, currentRole, currentUserId }) => {
             <h3 className="font-bold">{selectedMember?.name}</h3>
             <p className="text-sm text-gray-500">{selectedMember?.email}</p>
           </div>
-          <button
-            onClick={handleDeleteMember}
-            className="w-full bg-red-500 hover:bg-red-600 text-white p-3 rounded-2xl font-bold transition-colors"
-          >
+          <button onClick={handleDeleteMember} className="w-full bg-red-500 hover:bg-red-600 text-white p-3 rounded-2xl font-bold transition-colors">
             Hapus Member
           </button>
         </div>

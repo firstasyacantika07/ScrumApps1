@@ -34,7 +34,7 @@ const Info = () => {
       content: "Jika mengalami kendala, silakan hubungi tim dukungan kami melalui email resmi.",
       link: {
         label: "support@scrumapps.id",
-        url: "mailto:support@scrumapps.id",
+        url: "mailto:tasyaacc7@scrumapps.id",
         icon: <Mail size={14} className="mr-2" />
       }
     },
@@ -52,7 +52,7 @@ const Info = () => {
   return (
     <div className="min-h-screen bg-[#f8fafc] py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-4xl mx-auto">
-        
+
         {/* HEADER SECTION */}
         <div className="text-center mb-12">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl mb-4">

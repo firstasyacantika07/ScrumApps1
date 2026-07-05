@@ -52,39 +52,44 @@ const BacklogPage = () => {
     fetchProjects();
   }, [projectIdFromParams]);
 
-  useEffect(() => {
-    const fetchBacklogData = async () => {
-      try {
-        setLoading(true);
-        const token = localStorage.getItem('token');
-        const config = {
-          headers: { Authorization: token ? `Bearer ${token}` : '' }
-        };
-
-        const [projectRes, backlogRes] = await Promise.all([
-          api.get(`/projects/${projectId}`, config).catch(() => ({ data: null })),
-          api.get(`/projects/${projectId}/backlogs`, config).catch(() => ({ data: [] }))
-        ]);
-
-        if (projectRes?.data) {
-          setProject(projectRes.data.data || projectRes.data);
-        }
-        
-        const backlogList = backlogRes.data?.data || backlogRes.data || [];
-        setBacklogs(Array.isArray(backlogList) ? backlogList : []);
-      } catch (error) {
-        console.error("Gagal memuat data backlog:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (projectId) fetchBacklogData();
-    else {
-      // Tidak ada projectId, reset state
+  // 🛠️ FIX: dipindah keluar dari useEffect (sebelumnya hanya fungsi lokal
+  // di dalam useEffect) supaya bisa dipanggil ulang secara manual dari
+  // handleAddBacklog untuk merefresh list + data project setelah backlog
+  // baru berhasil disimpan ke database.
+  const fetchBacklogData = async () => {
+    if (!projectId) {
       setBacklogs([]);
       setProject(null);
+      return;
     }
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      const config = {
+        headers: { Authorization: token ? `Bearer ${token}` : '' }
+      };
+
+      const [projectRes, backlogRes] = await Promise.all([
+        api.get(`/projects/${projectId}`, config).catch(() => ({ data: null })),
+        api.get(`/projects/${projectId}/backlogs`, config).catch(() => ({ data: [] }))
+      ]);
+
+      if (projectRes?.data) {
+        setProject(projectRes.data.data || projectRes.data);
+      }
+
+      const backlogList = backlogRes.data?.data || backlogRes.data || [];
+      setBacklogs(Array.isArray(backlogList) ? backlogList : []);
+    } catch (error) {
+      console.error("Gagal memuat data backlog:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBacklogData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   // --- FUNGSI SUBMIT: MENAMBAHKAN BACKLOG BARU KE DATABASE ---
@@ -102,12 +107,18 @@ const BacklogPage = () => {
         headers: { Authorization: token ? `Bearer ${token}` : '' }
       };
 
+      // 🛠️ FIX: payload sebelumnya memakai field "title" & value berkapital
+      // ("Low"/"Active"), padahal backend & komponen Backlog.jsx (tab di
+      // halaman detail proyek) memakai field "name" dan value lowercase
+      // ("low"/"active"). Akibatnya backlog yang ditambahkan dari halaman
+      // ini tidak nyambung/tidak tampil di tab Backlog detail proyek.
       const payload = {
-        title: namaBacklog,
+        name: namaBacklog,
         applicant: applicant,
-        priority: prioritas,
-        status: statusDatabase,
-        description: deskripsi
+        priority: prioritas.toLowerCase(),
+        status: statusDatabase === 'Active' ? 'active' : 'inactive',
+        description: deskripsi,
+        project_id: projectId,
       };
 
       const res = await api.post(`/projects/${projectId}/backlogs`, payload, config);
@@ -122,6 +133,11 @@ const BacklogPage = () => {
       setPrioritas('Low');
       setStatusDatabase('Inactive (Draft)');
       setDeskripsi('');
+
+      // 🛠️ FIX: refresh ulang dari server supaya data (termasuk id asli)
+      // benar-benar sinkron dengan yang tersimpan di database & yang akan
+      // dilihat lewat tab Backlog di halaman detail proyek.
+      fetchBacklogData();
     } catch (error) {
       console.error("Gagal menambahkan backlog:", error);
       alert("Gagal menambahkan backlog. Silakan coba lagi.");
@@ -288,9 +304,9 @@ const BacklogPage = () => {
                   <div className="w-2 h-2 bg-blue-500 rounded-full mt-1.5 flex-shrink-0" />
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h5 className="font-bold text-slate-800 text-sm">{item.title || item.name}</h5>
+                      <h5 className="font-bold text-slate-800 text-sm">{item.name || item.title}</h5>
                       <span className="px-2 py-0.5 bg-slate-100 text-slate-600 font-black text-[9px] uppercase rounded tracking-wide">
-                        {item.priority || 'LOW'}
+                        {(item.priority || 'low').toUpperCase()}
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-1">{item.description || 'Tidak ada deskripsi'}</p>
@@ -354,11 +370,11 @@ const BacklogPage = () => {
             {backlogs.map((item, idx) => (
               <div key={item.id || idx} className="mb-6 text-xs text-black break-inside-avoid">
                 <h3 className="font-bold mb-1.5 uppercase">
-                  {String.fromCharCode(65 + idx)}. User Story ({item.title || item.name || 'Fitur'})
+                  {String.fromCharCode(65 + idx)}. User Story ({item.name || item.title || 'Fitur'})
                 </h3>
                 <div className="ml-4 mb-2">
                   <span className="font-semibold text-gray-700">Priority: </span>
-                  <span className="uppercase text-red-600 font-bold">{(item.priority || 'LOW')}</span>
+                  <span className="uppercase text-red-600 font-bold">{(item.priority || 'low').toUpperCase()}</span>
                 </div>
                 <p className="ml-4 text-gray-800 leading-relaxed bg-gray-50 p-2.5 rounded border border-gray-100">
                   {item.description || 'Tidak ada keterangan kriteria pengerjaan backlog.'}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { User, Search, LogOut } from 'lucide-react';
-import Sidebar from '../components/Sidebar';
+import Sidebar from '../components/sidebar';
 import NotificationBell from '../components/NotificationBell';
 import api from '../api/axios';
 
@@ -81,15 +81,11 @@ const MainLayout = () => {
   if (!user) return null;
 
   return (
-    <div className="flex h-screen w-full bg-[#f8fafc] font-sans overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen w-full bg-[#f8fafc] font-sans overflow-hidden">
       
-      {/* SIDEBAR AREA */}
-      <aside 
-        className={`${
-          isCollapsed ? 'w-20' : 'w-64'
-        } transition-all duration-300 flex-shrink-0 z-50 bg-[#1e1e2d] shadow-2xl relative`}
-      >
-        {/* 🔥 FIX: Mengalirkan variabel 'user' ke prop userData Sidebar */}
+      {/* SIDEBAR AREA (Dioptimalkan agar pembungkus mengikuti sifat responsif Sidebar internal) */}
+      <aside className="z-50 flex-shrink-0 md:block relative">
+        {/* 🔥 Mengalirkan variabel 'user' ke prop userData Sidebar */}
         <Sidebar 
           isCollapsed={isCollapsed} 
           setIsCollapsed={setIsCollapsed} 
@@ -101,51 +97,52 @@ const MainLayout = () => {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         
         {/* HEADER */}
-        <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-8 shrink-0">
+        <header className="h-20 bg-white border-b border-slate-100 flex items-center justify-between px-5 md:px-8 shrink-0">
+          
           {/* Search Bar — disembunyikan untuk role Superadmin */}
           {user?.role?.toString().toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin' && (
-          <div className="hidden md:flex flex-col relative w-72" ref={searchBoxRef}>
-            <div className="flex items-center bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
-              <Search size={18} className="text-slate-400" />
-              <input
-                type="text"
-                placeholder="Cari proyek..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setIsSearchOpen(true);
-                }}
-                onFocus={() => setIsSearchOpen(true)}
-                className="bg-transparent border-none focus:ring-0 text-sm ml-2 w-full outline-none"
-              />
-            </div>
-
-            {/* Dropdown hasil pencarian */}
-            {isSearchOpen && searchQuery.trim() && (
-              <div className="absolute top-full mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-xl z-50 overflow-hidden">
-                {isSearchLoading ? (
-                  <div className="px-4 py-3 text-xs text-slate-400 font-semibold">Memuat proyek...</div>
-                ) : searchResults.length > 0 ? (
-                  searchResults.map((project) => (
-                    <button
-                      key={project.id}
-                      onClick={() => handleSelectProject(project)}
-                      className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-b-0"
-                    >
-                      {project.name || project.title}
-                    </button>
-                  ))
-                ) : (
-                  <div className="px-4 py-3 text-xs text-slate-400 font-semibold">
-                    Tidak ada proyek dengan nama tersebut
-                  </div>
-                )}
+            <div className="hidden md:flex flex-col relative w-72" ref={searchBoxRef}>
+              <div className="flex items-center bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
+                <Search size={18} className="text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Cari proyek..."
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setIsSearchOpen(true);
+                  }}
+                  onFocus={() => setIsSearchOpen(true)}
+                  className="bg-transparent border-none focus:ring-0 text-sm ml-2 w-full outline-none"
+                />
               </div>
-            )}
-          </div>
+
+              {/* Dropdown hasil pencarian */}
+              {isSearchOpen && searchQuery.trim() && (
+                <div className="absolute top-full mt-2 w-full bg-white border border-slate-100 rounded-xl shadow-xl z-50 overflow-hidden">
+                  {isSearchLoading ? (
+                    <div className="px-4 py-3 text-xs text-slate-400 font-semibold">Memuat proyek...</div>
+                  ) : searchResults.length > 0 ? (
+                    searchResults.map((project) => (
+                      <button
+                        key={project.id}
+                        onClick={() => handleSelectProject(project)}
+                        className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-b-0"
+                      >
+                        {project.name || project.title}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-3 text-xs text-slate-400 font-semibold">
+                      Tidak ada proyek dengan nama tersebut
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           
-          <div className="flex items-center gap-6 ml-auto">
+          <div className="flex items-center gap-4 md:gap-6 ml-auto">
             {/* Notification Bell: dropdown notifikasi real dari API, muncul di semua halaman */}
             <NotificationBell />
 
@@ -153,9 +150,9 @@ const MainLayout = () => {
             <div className="relative">
               <button 
                 onClick={() => setIsSettingsOpen(!isSettingsOpen)} 
-                className="flex items-center gap-3 hover:bg-slate-50 p-1.5 rounded-xl transition-all"
+                className="flex items-center gap-2 md:gap-3 hover:bg-slate-50 p-1.5 rounded-xl transition-all"
               >
-                <div className="h-10 w-10 rounded-lg overflow-hidden border-2 border-slate-100 shadow-sm">
+                <div className="h-9 w-9 md:h-10 md:w-10 rounded-lg overflow-hidden border-2 border-slate-100 shadow-sm shrink-0">
                    <img 
                      src={`https://ui-avatars.com/api/?name=${user.username || 'User'}&background=ee1e2d&color=fff`} 
                      alt="user" 
@@ -195,9 +192,9 @@ const MainLayout = () => {
           </div>
         </header>
 
-        {/* CONTENT AREA */}
-        <main className="flex-1 overflow-y-auto p-8 bg-[#f8fafc]">
-          {/* 🌟 FIX: Salurkan context dengan nama 'user' yang valid */}
+        {/* CONTENT AREA (Responsif Padding antara Mobile & Desktop) */}
+        <main className="flex-1 overflow-y-auto p-5 md:p-8 bg-[#f8fafc]">
+          {/* 🌟 Salurkan context dengan nama 'user' yang valid */}
           <Outlet context={{ user }} /> 
         </main>
 

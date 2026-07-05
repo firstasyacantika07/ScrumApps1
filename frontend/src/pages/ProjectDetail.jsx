@@ -198,18 +198,11 @@ const ProjectDetail = () => {
   }, [id, fetchProject, fetchGitHubStatus]);
 
   const isSuperAdmin = currentUser.role === 'SUPERADMIN';
-  // 🛠️ FIX: role 'ADMIN' sebelumnya tidak pernah dicek di sini, sehingga
-  // hasWriteAccess() SELALU false untuk Admin dan tombol "TAMBAH" di tab
-  // Vision Board & Backlog tidak pernah muncul untuk role Admin, walau
-  // backend (projectRoutes.js) sudah mengizinkan admin create/update kedua
-  // modul itu.
   const isAdmin = currentUser.role === 'ADMIN';
   const isBA = currentUser.role === 'BUSINESSANALYST';
   const isProjectOwner = currentUser.role === 'PROJECTOWNER';
 
   const hasWriteAccess = () => {
-    // isProjectOwner tetap dibuat read-only di sini secara sengaja (lihat
-    // badge "Mode Pantau (Read-Only)" di bawah) — bukan bug, jadi tidak diubah.
     if (isProjectOwner) return false;
     if (isSuperAdmin || isAdmin) return true;
     if (isBA && (location.pathname.includes('vision-board') || location.pathname.includes('backlog'))) return true;
@@ -217,13 +210,10 @@ const ProjectDetail = () => {
     return false;
   };
 
-  // 🛠️ Fungsi interceptor ketika tombol TAMBAH di pojok kanan atas diklik
   const handleAddButtonClick = () => {
     if (location.pathname.includes('vision-board')) {
-      // Alihkan aksi langsung ke fungsi modal internal milik VisionBoard.jsx
       visionBoardRef.current?.openNewBoardModal();
     } else {
-      // Untuk modul backlog (atau modul lain yang form-nya simpel), pakai modal bawaan
       setFormData({ title: '', description: '' }); 
       setShowAddModal(true);
     }
@@ -299,7 +289,6 @@ const ProjectDetail = () => {
         <div className="flex items-center gap-2">
           {['backlog', 'vision-board'].some(p => location.pathname.includes(p)) ? (
             hasWriteAccess() ? (
-              /* 🛠️ Diperbarui ke fungsi handleAddButtonClick */
               <button onClick={handleAddButtonClick}
                 className="bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-black flex items-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-95">
                 <Plus size={18} strokeWidth={3} /> TAMBAH {getModalType().toUpperCase()}
@@ -336,12 +325,11 @@ const ProjectDetail = () => {
           </div>
         </div>
 
-        {/* CONTENT AREA */}
-        <div className="col-span-12 lg:col-span-9 bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm min-h-[600px]">
+        {/* CONTENT AREA: 🛠️ Ditambahkan class 'block w-full clear-both static' untuk isolasi total */}
+        <div className="col-span-12 lg:col-span-9 bg-white rounded-[2.5rem] p-8 border border-slate-100 shadow-sm min-h-[600px] block w-full clear-both static">
           <Routes>
             <Route path="/" element={<DefaultView project={project} integrationData={integrationData} refreshData={fetchGitHubStatus} />} />
             <Route path="calendar" element={<ProjectCalendar projectId={id} currentRole={currentUser.role} />} />
-            {/* 🛠️ Pasangkan ref={visionBoardRef} ke komponen VisionBoard di bawah ini */}
             <Route path="vision-board" element={<VisionBoard ref={visionBoardRef} projectId={id} currentRole={currentUser.role} />} />
             <Route path="backlog" element={<Backlog projectId={id} currentRole={currentUser.role} />} />
             <Route path="sprint" element={<Sprint projectId={id} currentRole={currentUser.role} />} />
@@ -352,7 +340,7 @@ const ProjectDetail = () => {
         </div>
       </div>
 
-      {/* MODAL DYNAMIC (Sekarang Hanya Menangani Backlog / Form Simpel) */}
+      {/* MODAL DYNAMIC */}
       {showAddModal && hasWriteAccess() && location.pathname.includes('backlog') && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden">
@@ -368,7 +356,7 @@ const ProjectDetail = () => {
               <div className="flex gap-3 pt-4">
                 <button onClick={() => setShowAddModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase hover:bg-slate-200 transition-all">Batal</button>
                 <button onClick={handleSave} disabled={isSubmitting} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
-                  {isSubmitting ? 'Menyimpan...' : `Simpan {getModalType()}`}
+                  {isSubmitting ? 'Menyimpan...' : `Simpan ${getModalType()}`}
                 </button>
               </div>
             </div>
@@ -402,7 +390,6 @@ const DefaultView = ({ project, integrationData, refreshData }) => (
       <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Integrasi Aplikasi</h4>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <GitHubStatusCard project={project} integrationData={integrationData} refreshData={refreshData} />
-        {/* ✅ GitHub Feed: Menampilkan aktivitas commit & PR dari repository */}
         <GitHubFeed projectId={project?.id} integrationData={integrationData} />
       </div>
     </div>

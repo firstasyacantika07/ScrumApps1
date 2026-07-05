@@ -20,7 +20,7 @@ const Payment = () => {
     orderId,
     planName,
     price,
-    period,
+    period, // Mengandung '/bulan' atau '/tahun'
   } = location.state || {};
 
   const [loading, setLoading] = useState(false);
@@ -61,7 +61,7 @@ const Payment = () => {
       onSuccess: async function (result) {
         console.log('Midtrans Success Result:', result);
         try {
-          // Menentukan billing cycle berdasarkan props period yang dibawa ('/bulan' atau lainnya)
+          // Menentukan billing cycle berdasarkan state period dari komponen Billing
           const billingCycle = period === '/tahun' ? 'YEARLY' : 'MONTHLY';
 
           // 1. Hit ke Backend untuk aktivasi paket di DB lokal
@@ -100,15 +100,14 @@ const Payment = () => {
       },
 
       // =========================================================
-      // 💡 PERBAIKAN: RESOLVE STATE SAAT POPUP DITUTUP MANUAL
+      // 💡 RESOLVE STATE SAAT POPUP DITUTUP MANUAL
       // =========================================================
       onClose: function () {
         console.log('User closed the snap popup.');
         setLoading(false);
-        
-        // Opsional: Berikan notifikasi kecil agar user tidak bingung mengapa jendela hilang
+
         alert('Pembayaran dibatalkan. Anda bisa mencoba kembali kapan saja melalui menu ini.');
-        
+
         // Alihkan navigasi secara aman untuk mereset frame komunikasi localhost vs Sandbox
         navigate('/billing');
       },
@@ -145,7 +144,7 @@ const Payment = () => {
           <div className="mt-8 rounded-2xl bg-slate-50 border border-slate-100 p-5 text-left space-y-4">
             <div className="flex justify-between">
               <span className="text-sm text-slate-500">Paket</span>
-              <span className="font-bold">{planName}</span>
+              <span className="font-bold">{planName} ({period === '/tahun' ? 'TAHUNAN' : 'BULANAN'})</span>
             </div>
 
             <div className="flex justify-between">
@@ -176,7 +175,7 @@ const Payment = () => {
   return (
     <div className="min-h-screen bg-slate-50 py-8 px-4">
       <div className="max-w-6xl mx-auto">
-        
+
         {/* HEADER */}
         <div className="flex items-center justify-between mb-8">
           <button
@@ -252,7 +251,7 @@ const Payment = () => {
 
                 <div className="flex justify-between">
                   <span className="text-slate-400">Durasi</span>
-                  <span className="font-bold">{period}</span>
+                  <span className="font-bold">{period === '/tahun' ? 'Per Tahun' : 'Per Bulan'}</span>
                 </div>
 
                 <div className="flex justify-between">

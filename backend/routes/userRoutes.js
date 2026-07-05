@@ -1,3 +1,4 @@
+// routes/userRoutes.js
 const express = require('express');
 const router = express.Router();
 
@@ -30,7 +31,6 @@ router.use(verifyToken);
    ========================================================================= */
 
 // 🏢 GET: Mengambil list seluruh anggota tim berdasarkan tenant yang sedang aktif login
-// Merespon request dari Users.jsx frontend
 router.get('/', userController.getUsersByTenant);
 
 // ➕ POST: Membuat user baru via modal dashboard internal workspace
@@ -47,11 +47,12 @@ router.post('/invitations', invitationController.inviteUser);
 // 🗑️ DELETE: Menghapus / mencabut hak akses user tertentu berdasarkan ID
 router.delete('/:id', userController.deleteUser);
 
-// ✏️ PUT: Menangani perubahan data profil pengguna internal tim
+// ✏️ PUT: Menangani perubahan data profil pengguna internal tim (Multi-Tenant Safe)
 router.put('/:id', async (req, res) => {
   try {
     const { name, gender, email, phone_number, password } = req.body;
-    const tenantId = req.user?.tenant_id; // 🔧 Menggunakan optional chaining demi keamanan
+    const tenantId = req.user?.tenant_id;
+    const targetUserId = req.params.id;
     const db = require('../config/db');
     const bcrypt = require('bcryptjs');
 
@@ -69,9 +70,36 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    // 🔧 FIX: Normalisasi email agar konsisten dengan proses login & register (lowercase + trim)
+    // 1. ✅ FIX MULTI-TENANT VALIDATION: Pastikan target user memang terdaftar di workspace admin ini via pivot
+    const [membershipCheck] = await db.query(
+      `SELECT id FROM tbr_tenant_users WHERE user_id = ? AND tenant_id = ?`,
+      [targetUserId, tenantId]
+    );
+
+    if (membershipCheck.length === 0) {
+      return res.status(403).json({ 
+        success: false,
+        message: "Akses ditolak: User tidak ditemukan atau bukan merupakan bagian dari workspace Anda." 
+      });
+    }
+
+    // 2. Normalisasi email
     const cleanEmail = email.trim().toLowerCase();
 
+    // 3. Cek duplikasi email global (kecuali milik user itu sendiri)
+    const [emailCheck] = await db.query(
+      `SELECT id FROM tbr_users WHERE email = ? AND id != ?`,
+      [cleanEmail, targetUserId]
+    );
+
+    if (emailCheck.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Email sudah digunakan oleh pengguna lain di sistem."
+      });
+    }
+
+    // 4. Bangun query dinamis untuk update profil global tbr_users
     let query = `
       UPDATE tbr_users
       SET name=?, gender=?, email=?, phone_number=?
@@ -84,21 +112,14 @@ router.put('/:id', async (req, res) => {
       params.push(hash);
     }
 
-    query += ` WHERE id=? AND tenant_id=?`;
-    params.push(req.params.id, tenantId);
+    query += ` WHERE id=?`;
+    params.push(targetUserId);
 
-    const [result] = await db.query(query, params);
-
-    if (result.affectedRows === 0) {
-      return res.status(403).json({ 
-        success: false,
-        message: "Akses ditolak atau user tidak ditemukan di workspace ini." 
-      });
-    }
+    await db.query(query, params);
 
     return res.status(200).json({ 
       success: true,
-      message: "Data user berhasil diperbarui" 
+      message: "Data profil user berhasil diperbarui." 
     });
 
   } catch (err) {

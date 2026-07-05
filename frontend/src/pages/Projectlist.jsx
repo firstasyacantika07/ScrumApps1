@@ -1,7 +1,9 @@
+// pages/ProjectList.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Modal from "../components/ui/Modal";
 import api from "../api/axios";
+import { useAuth } from "../context/AuthContext"; 
 import {
   Plus,
   Trash2,
@@ -11,6 +13,7 @@ import {
 
 const ProjectList = () => {
   const navigate = useNavigate();
+  const { refreshUser, user: authUser } = useAuth(); 
 
   // ==========================
   // STATES
@@ -21,67 +24,77 @@ const ProjectList = () => {
   const [isEdit, setIsEdit] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [upgradeModal, setUpgradeModal] = useState(false);
-  const [modalReason, setModalReason] = useState(""); // "free_limit" atau "trial_expired"
+  const [modalReason, setModalReason] = useState(""); 
 
-  // 🆕 Daftar akun kandidat Product Owner, diambil dari anggota tim yang sudah
-  // di-invite ke workspace (dipakai untuk dropdown "Akun PO" di modal Tambah Project)
   const [teamMembers, setTeamMembers] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
-
-  const [userData, setUserData] = useState(() => {
-    return JSON.parse(localStorage.getItem("user") || "{}");
-  });
-
   const [toast, setToast] = useState({ show: false, msg: "", type: "" });
 
   const initialForm = {
     name: "",
     status: "hold",
-    label: "external", // Default value yang diwajibkan oleh database schema
-    owner_id: "", // 🆕 Akun yang akan dipatenkan sebagai Product Owner proyek ini
+    label: "external", 
+    owner_id: "", 
   };
 
   const [formData, setFormData] = useState(initialForm);
 
-  // ==========================
-  // DERIVED STATES & ALUR TRIAL (SINKRONISASI PLAN_ID SAAS)
-  // ==========================
+  // ==========================================================================
+  // DERIVED STATES & ALUR TRIAL (FIXED: PRIORITAS AKUN USER UTAMA)
+  // ==========================================================================
   
-  // ✨ FIX SAFELY: Mengonversi dan memetakan plan_id jika berupa angka/ID dari DB
   const getPackageString = () => {
-    const rawPackage = userData?.plan_id || userData?.package_type || "FREE";
-    if (rawPackage === 1 || rawPackage === "1") return "FREE";
-    if (rawPackage === 2 || rawPackage === "2") return "PRO";
+    // 💡 FIX: Ambil status murni dari akun pengguna (Context / LocalStorage) sebagai prioritas utama
+    const currentContextUser = authUser || JSON.parse(localStorage.getItem("user") || "{}");
+    let rawPackage = currentContextUser?.package_type || currentContextUser?.plan_id;
+
+    // Jika data di user kosong, baru fallback ke data project terdekat
+    if (!rawPackage && projects && projects.length > 0 && projects[0].package_type) {
+      rawPackage = projects[0].package_type;
+    }
+
+    // Jika semuanya kosong, default ke FREE
+    if (!rawPackage) rawPackage = "FREE";
+
+    // Normalisasi data jika tipe data berupa Integer, String angka, atau String Nama Paket
+    if (rawPackage === 1 || rawPackage === "1" || String(rawPackage).toUpperCase() === "FREE") return "FREE";
+    if (rawPackage === 2 || rawPackage === "2" || String(rawPackage).toUpperCase() === "PRO") return "PRO";
     return String(rawPackage).toUpperCase();
   };
 
   const getBillingCycleString = () => {
-    return String(userData?.billing_cycle || "").toUpperCase();
+    const currentContextUser = authUser || JSON.parse(localStorage.getItem("user") || "{}");
+    return String(currentContextUser?.billing_cycle || "").toUpperCase();
   };
 
   const currentPackage = getPackageString(); 
   const billingCycle = getBillingCycleString();
-  const isTrial = billingCycle === "TRIAL" && currentPackage === "PRO";
-  const hasExpiredTrial = userData?.expired_trial === true || userData?.expired_trial === 1;
   
-  // VALIDASI ROLE: Diproteksi dengan String() agar aman dari error .toUpperCase()
-  const isSuperAdmin = String(userData?.role || "").toUpperCase() === "SUPERADMIN";
-  // ✨ FIX BUG #1: Backend menjadikan SUPERADMIN read-only untuk semua project actions
-  // (create/update = 403, delete cuma untuk role ADMIN). Frontend sebelumnya salah
-  // memakai isSuperAdmin untuk gating tombol Create/Edit/Delete, seharusnya isAdmin.
-  const isAdmin = String(userData?.role || "").toUpperCase() === "ADMIN";
-
-  // Aturan Batasan Pembuatan Project Baru
-  const projectLimit = 1;
   const isFreePackage = currentPackage === "FREE";
+  const isProPackage = currentPackage === "PRO";
+
+  // Evaluasi status Trial secara aman
+  const isTrial = billingCycle === "TRIAL" && isProPackage;
   
-  // Terkena limit jika paket FREE murni (dan project >= 1) ATAU eks-trial yang sudah kedaluwarsa
+  const currentContextUser = authUser || JSON.parse(localStorage.getItem("user") || "{}");
+  
+  // Jika paket sudah terdeteksi PRO, paksa flag expired menjadi false agar fitur tidak terkunci data lokal usang
+  const hasExpiredTrial = isProPackage 
+    ? false 
+    : (currentContextUser?.expired_trial === true || currentContextUser?.expired_trial === 1);
+  
+  const isSuperAdmin = String(currentContextUser?.role || "").toUpperCase() === "SUPERADMIN";
+  const isAdmin = String(currentContextUser?.role || "").toUpperCase() === "ADMIN";
+
+  // Sesuai dengan billingController Anda: FREE limit adalah 1 project
+  const projectLimit = 1;
+  
+  // Limit tercapai HANYA jika pengguna berada di paket FREE dan proyek melebihi batas, ATAU trial memang habis
   const reachedLimit = (isFreePackage && projects.length >= projectLimit) || hasExpiredTrial;
 
-  // Perhitungan Sisa Hari yang Akurat & Kebal Nilai Negatif
   const getRemainingDays = () => {
-    if (!userData?.end_date) return 0;
-    const diffTime = new Date(userData.end_date).getTime() - new Date().getTime();
+    if (!currentContextUser?.end_date) return 0;
+    const diffTime = new Date(currentContextUser.end_date).getTime() - new Date().getTime();
     const remaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return remaining > 0 ? remaining : 0;
   };
@@ -115,9 +128,6 @@ const ProjectList = () => {
     }
   };
 
-  // 🆕 Ambil daftar anggota tim (hasil invite) untuk diisi ke dropdown "Akun PO".
-  // Asumsi endpoint: GET /users (sesuai userRoutes.js). Sesuaikan URL-nya kalau
-  // daftar karyawan di halaman "Kelola Karyawan" ternyata memakai endpoint lain.
   const fetchTeamMembers = async () => {
     try {
       setLoadingMembers(true);
@@ -133,11 +143,20 @@ const ProjectList = () => {
   };
 
   useEffect(() => {
-    const localUser = JSON.parse(localStorage.getItem("user") || "{}");
-    setUserData(localUser);
-    fetchProjects();
-    fetchTeamMembers();
-  }, []);
+    const initPageData = async () => {
+      if (refreshUser) {
+        try {
+          await refreshUser(); 
+        } catch (err) {
+          console.error("Refresh user context failed", err);
+        }
+      }
+      fetchProjects();
+      fetchTeamMembers();
+    };
+    
+    initPageData();
+  }, [refreshUser]);
 
   // ==========================
   // ACTIONS
@@ -186,17 +205,14 @@ const ProjectList = () => {
       return;
     }
 
-    // 🆕 Akun PO wajib dipilih saat membuat project baru, supaya PO langsung
-    // tercatat sebagai member (RF-13.1) dan menerima notifikasi penugasan.
     if (!isEdit && !formData.owner_id) {
       showToast("Pilih Akun PO terlebih dahulu", "error");
       return;
     }
 
-    // Bersihkan Tenant ID dari localStorage
-    let cleanTenantId = userData?.tenant_id;
+    let cleanTenantId = currentContextUser?.tenant_id;
     if (!cleanTenantId || cleanTenantId === "NULL" || cleanTenantId === null) {
-      cleanTenantId = 1; // Fallback ke master tenant default jika kosong
+      cleanTenantId = 1; 
     }
 
     const payload = {
@@ -204,8 +220,6 @@ const ProjectList = () => {
       tenant_id: Number(cleanTenantId)
     };
 
-    // owner_id hanya relevan saat membuat project baru (backend belum mendukung
-    // pemindahan PO lewat updateProject)
     if (isEdit) {
       delete payload.owner_id;
     }
@@ -265,7 +279,6 @@ const ProjectList = () => {
       )}
 
       <div className="p-6">
-        
         {/* BANNER TRIAL */}
         {isTrial && remainingDays > 0 && (
           <div className={`mb-6 p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm ${
@@ -281,7 +294,7 @@ const ProjectList = () => {
                     ? `Trial PRO Anda akan berakhir dalam ${remainingDays} hari!` 
                     : "Anda sedang menikmati akses penuh PRO Trial (7 Hari)."}
                 </p>
-                <p className="text-xs opacity-80 mt-0.5">Berakhir otomatis pada: {userData.end_date}</p>
+                <p className="text-xs opacity-80 mt-0.5">Berakhir otomatis pada: {currentContextUser.end_date}</p>
               </div>
             </div>
             {remainingDays <= 3 && (
@@ -349,7 +362,7 @@ const ProjectList = () => {
                     <Plus size={18} />
                     {reachedLimit ? "Upgrade Paket" : "Tambah Proyek"}
                   </button>
-                  {isFreePackage && !hasExpiredTrial && projects.length >= projectLimit && (
+                  {isFreePackage && !hasExpiredTrial && (
                     <p className="mt-4 text-xs text-center text-amber-600 font-medium px-6">
                       Maksimal {projectLimit} project untuk paket FREE.
                     </p>
