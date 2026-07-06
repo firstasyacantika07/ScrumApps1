@@ -26,24 +26,19 @@ const Register = () => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-    try {
-      // Mengirimkan data registrasi lengkap (termasuk company_name) ke backend
-      const response = await api.post('/auth/register', formData);
-
-      // Auto-login setelah register sukses, redirect ke dashboard
-      if (response.data?.token) {
-        login(response.data.token, response.data.user);
-        navigate('/dashboard');
-      } else {
-        alert('Registrasi berhasil! Silakan login.');
-        navigate('/login');
-      }
-    } catch (err) {
-      setError(err.response?.data?.message || 'Terjadi kesalahan saat registrasi');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      try {
+          const response = await api.post('/auth/register', formData);
+          
+          if (response.data.success) {
+            alert("Registrasi Berhasil! Silakan login untuk masuk.");
+            
+            // 🛠️ PASTIKAN NAVIGASI DIARAHKAN KE /login
+            navigate('/login'); 
+          }
+        } catch (error) {
+          console.error("Register error:", error);
+        }
+      };
 
   return (
     <div className="flex min-h-screen w-full bg-white antialiased">

@@ -2,31 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <title>ScrumApps - Project Management</title>
 
-    <!-- GOOGLE FONTS -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-
-    <link
-      rel="preconnect"
-      href="https://fonts.gstatic.com"
-      crossorigin
+    <meta 
+      http-equiv="Content-Security-Policy" 
+      content="default-src 'self'; 
+               script-src 'self' 'unsafe-inline' 'unsafe-eval' https://app.sandbox.midtrans.com https://snap-assets.sandbox.midtrans.com https://api.sandbox.midtrans.com https://pay.google.com https://gwk.gopayapi.com https://www.googletagmanager.com https://accounts.google.com blob:; 
+               worker-src 'self' blob:;
+               style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; 
+               style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com; 
+               font-src 'self' data: https://fonts.gstatic.com; 
+               img-src 'self' data: https://snap-assets.sandbox.midtrans.com https://accounts.google.com https://ui-avatars.com; 
+               frame-src 'self' https://app.sandbox.midtrans.com https://accounts.google.com; 
+               connect-src 'self' http://localhost:* ws://localhost:* https://api.sandbox.midtrans.com https://accounts.google.com;" 
     />
 
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
 
-    <!-- MIDTRANS SNAP -->
     <script
       type="text/javascript"
       src="https://app.sandbox.midtrans.com/snap/snap.js"
@@ -37,7 +37,6 @@
   <body>
     <div id="root"></div>
 
-    <!-- REACT / VITE -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

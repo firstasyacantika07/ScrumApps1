@@ -4,8 +4,7 @@ import {
   User,
   Mail,
   Phone,
-  MapPin,
-  Hash,
+  Lock,
   UserCircle
 } from 'lucide-react';
 
@@ -20,9 +19,7 @@ const KelolaProfil = () => {
   const [formData, setFormData] = useState({
     name: "",
     gender: "male",
-    nik: "",
-    alamat: "",
-    phone: "",
+    phone_number: "", 
     email: "",
     password: ""
   });
@@ -40,13 +37,10 @@ const KelolaProfil = () => {
 
     setFormData({
       name: user.name || "",
-      // PERBAIKAN: Memastikan format huruf kecil (lowercase) agar cocok dengan value option select ('male'/'female')
       gender: user.gender ? user.gender.toLowerCase().trim() : "male", 
-      nik: user.nik || "",
-      alamat: user.alamat || "",
-      phone: user.phone_number || "",
+      phone_number: user.phone_number || "", 
       email: user.email || "",
-      password: ""
+      password: "" // Dikosongkan secara default demi keamanan
     });
   }, [navigate]);
 
@@ -78,11 +72,10 @@ const KelolaProfil = () => {
         name: formData.name,
         email: formData.email,
         gender: formData.gender,
-        nik: formData.nik,
-        alamat: formData.alamat,
-        phone_number: formData.phone,
+        phone_number: formData.phone_number,
       };
 
+      // Hanya masukkan password ke payload jika user mengetik sesuatu
       if (formData.password?.trim()) {
         payload.password = formData.password;
       }
@@ -172,38 +165,23 @@ const KelolaProfil = () => {
           />
 
           <InputGroup
-            label="NIK"
-            name="nik"
-            icon={<Hash size={16} />}
-            value={formData.nik}
-            onChange={handleChange}
-          />
-
-          <InputGroup
             label="No. Telepon"
-            name="phone"
+            name="phone_number"
             icon={<Phone size={16} />}
-            value={formData.phone}
+            value={formData.phone_number}
             onChange={handleChange}
           />
 
-          {/* ALAMAT */}
-          <div className="md:col-span-2 flex flex-col gap-2">
-            <label className="text-xs font-semibold text-gray-500 uppercase">
-              Alamat
-            </label>
-
-            <div className="relative">
-              <MapPin className="absolute left-4 top-4 text-gray-400" size={16} />
-
-              <textarea
-                name="alamat"
-                value={formData.alamat}
-                onChange={handleChange}
-                className="w-full p-3 pl-11 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-red-200 focus:border-red-400 outline-none transition"
-                rows={4}
-              />
-            </div>
+          {/* PASSWORD BARU (Kini tersedia kolomnya di UI) */}
+          <div className="md:col-span-2">
+            <InputGroup
+              label="Password Baru (Kosongkan jika tidak ingin diubah)"
+              name="password"
+              type="password"
+              icon={<Lock size={16} />}
+              value={formData.password}
+              onChange={handleChange}
+            />
           </div>
 
           {/* ACTION */}
@@ -267,8 +245,6 @@ const SelectGroup = ({ label, name, value, onChange, options }) => (
         <option 
           key={i} 
           value={opt.value}
-          // PERBAIKAN UTAMA: Memaksa opsi ditandai secara eksplisit berdasarkan sinkronisasi state
-          selected={value === opt.value}
         >
           {opt.label}
         </option>

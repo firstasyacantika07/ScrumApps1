@@ -371,12 +371,12 @@ const ProjectOwnerView = ({ scrumStats, recentProjects, navigate }) => {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <StatCardModern label="Jumlah Project" value={recentProjects.length} icon={<Briefcase />} color="#6366f1" />
-          <StatCardModern label="Total Backlog" value={scrumStats.total_backlogs} icon={<Package />} color="#ee1e2d" />
-          <StatCardModern label="In Progress" value={scrumStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
-          <StatCardModern label="Selesai" value={scrumStats.done} icon={<CheckCircle2 />} color="#22c55e" />
-          <StatCardModern label="Late/Delayed" value={scrumStats.late} icon={<AlertCircle />} color="#ef4444" />
+          <StatCardModern label="Project Hold / Baru" value={scrumStats.hold} icon={<FolderOpen />} color="#3b82f6" />
+          <StatCardModern label="Project Proses" value={scrumStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
+          <StatCardModern label="Project Selesai" value={scrumStats.done} icon={<CheckCircle2 />} color="#22c55e" />
+          <StatCardModern label="Project Terlambat" value={scrumStats.late} icon={<AlertCircle />} color="#ef4444" />
         </div>
-        <button onClick={() => navigate('/reports')} className="w-full flex items-center justify-center gap-2 py-4 bg-white border border-slate-200 text-slate-800 rounded-2xl text-xs font-black shadow-sm hover:bg-slate-50 transition-all">
+        <button onClick={() => navigate('/backlog')} className="w-full flex items-center justify-center gap-2 py-4 bg-white border border-slate-200 text-slate-800 rounded-2xl text-xs font-black shadow-sm hover:bg-slate-50 transition-all">
           Ekspor Dokumentasi Backlog (PDF) <ArrowRight size={16} />
         </button>
       </div>
@@ -384,7 +384,7 @@ const ProjectOwnerView = ({ scrumStats, recentProjects, navigate }) => {
       <div className="lg:col-span-4 bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col gap-4">
         <h3 className="text-xs font-black text-slate-400 uppercase tracking-[2px] border-l-4 border-[#ee1e2d] pl-4">Status Distribusi Kerja Proyek</h3>
         <div className="w-full h-[180px]">
-          {scrumStats.total_backlogs > 0 ? (
+          {recentProjects.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={[
                 { name: 'Hold', qty: scrumStats.hold },
@@ -396,16 +396,16 @@ const ProjectOwnerView = ({ scrumStats, recentProjects, navigate }) => {
                 <XAxis dataKey="name" stroke="#94a3b8" fontSize={9} tick={{ fontSize: 9 }} tickMargin={8} />
                 <YAxis stroke="#94a3b8" fontSize={9} allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="qty" name="Jumlah Task" fill="#ee1e2d" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                <Bar dataKey="qty" name="Jumlah Project" fill="#ee1e2d" radius={[4, 4, 0, 0]} maxBarSize={40} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="h-full flex items-center justify-center text-xs font-bold text-slate-400 uppercase tracking-wider">Tidak ada data sprint aktif</div>
+            <div className="h-full flex items-center justify-center text-xs font-bold text-slate-400 uppercase tracking-wider">Tidak ada data project aktif</div>
           )}
         </div>
         <div className="p-3 bg-slate-50 rounded-2xl flex flex-col gap-2 text-[10px] font-bold text-slate-500">
           <span>Sprint Aktif dikelola oleh Business Analyst.</span>
-          <button onClick={() => navigate('/kanban')} className="text-[#ee1e2d] font-black uppercase tracking-wider flex items-center gap-1">Pantau Kanban Board <ChevronRight size={12} /></button>
+          <button onClick={() => navigate('/projects')} className="text-[#ee1e2d] font-black uppercase tracking-wider flex items-center gap-1">Pantau Kanban Board <ChevronRight size={12} /></button>
         </div>
       </div>
     </div>
@@ -420,10 +420,10 @@ const BusinessAnalystView = ({ scrumStats, recentProjects, navigate }) => {
     <div className="space-y-8">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
         <StatCardModern label="Jumlah Project" value={recentProjects.length} icon={<Briefcase />} color="#6366f1" />
-        <StatCardModern label="Backlog Baru" value={scrumStats.hold} icon={<FolderOpen />} color="#3b82f6" />
-        <StatCardModern label="Dikerjakan Dev" value={scrumStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
-        <StatCardModern label="Selesai Ditinjau" value={scrumStats.done} icon={<CheckCircle2 />} color="#22c55e" />
-        <StatCardModern label="Melebihi Tenggat" value={scrumStats.late} icon={<AlertCircle />} color="#ef4444" />
+        <StatCardModern label="Project Hold / Baru" value={scrumStats.hold} icon={<FolderOpen />} color="#3b82f6" />
+        <StatCardModern label="Project Proses" value={scrumStats.progress} icon={<RefreshCcw />} color="#f59e0b" />
+        <StatCardModern label="Project Selesai" value={scrumStats.done} icon={<CheckCircle2 />} color="#22c55e" />
+        <StatCardModern label="Project Terlambat" value={scrumStats.late} icon={<AlertCircle />} color="#ef4444" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

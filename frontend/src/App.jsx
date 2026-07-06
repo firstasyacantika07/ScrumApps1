@@ -71,23 +71,8 @@ const AllowedRolesRoute = ({ children, allowedRoles = [] }) => {
 // ======================================================
 function AppRoutes() {
   const { user, loading, logout } = useAuth(); // 👈 Ambil fungsi logout jika tersedia di context
-  const [isInitialRun, setIsInitialRun] = useState(true);
+  const [isInitialRun, setIsInitialRun] = useState(false); // Tidak lagi menghapus sesi awal
 
-  // 🛠️ EFEK BARU: Memastikan sesi dibersihkan saat pertama kali aplikasi di-run / direfresh
-  useEffect(() => {
-    // Menghapus token dari localStorage agar rute kembali ke Login
-    localStorage.removeItem("token"); 
-    localStorage.removeItem("user");
-    
-    // Jika ada fungsi logout bawaan dari AuthContext, panggil di sini
-    if (logout) {
-      logout();
-    }
-
-    setIsInitialRun(false);
-  }, [logout]);
-
-  // Tunggu AuthContext selesai inisialisasi atau tunggu proses pembersihan awal selesai
   if (loading || isInitialRun) {
     return (
       <div style={{

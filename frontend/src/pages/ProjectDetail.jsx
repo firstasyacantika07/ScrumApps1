@@ -131,8 +131,6 @@ const ProjectDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-
-  // 🛠️ Membuat reference khusus untuk memicu modal internal Vision Board
   const visionBoardRef = useRef(null);
 
   const [project, setProject] = useState(null);
@@ -140,20 +138,34 @@ const ProjectDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  
   const [formData, setFormData] = useState({ title: '', description: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
   const [currentUser, setCurrentUser] = useState({ id: null, role: 'GUEST' });
 
+  const isProjectOwner = currentUser.role === 'PROJECTOWNER';
+
   const getModalType = () => {
-    if (location.pathname.includes('vision-board')) return 'Vision Board';
     if (location.pathname.includes('backlog')) return 'Backlog';
-    if (location.pathname.includes('sprint')) return 'Sprint';
-    if (location.pathname.includes('development')) return 'Development Task';
-    if (location.pathname.includes('calendar')) return 'Event';
-    return 'Item';
+    if (location.pathname.includes('vision-board')) return 'Vision Board';
+    return 'Data';
   };
+
+  // Fungsi pengecekan akses diperbarui
+  const hasWriteAccess = useCallback(() => {
+    const role = currentUser.role;
+    if (role === 'SUPERADMIN' || role === 'ADMIN') return true;
+    
+    // BA (ANALYST) diizinkan edit di modul tertentu
+    if (role === 'ANALYST' || role === 'BUSINESSANALYST') {
+      return ['vision-board', 'backlog'].some(path => location.pathname.includes(path));
+    }
+    
+    // TEAMDEVELOPER atau DEVELOPER diizinkan edit development dll
+    if (role === 'TEAMDEVELOPER' || role === 'DEVELOPER') return true;
+    
+    // ProjectOwner biasanya hanya baca/pantau
+    return false;
+  }, [currentUser.role, location.pathname]);
 
   const loadUserProfile = async () => {
     try {
@@ -173,7 +185,6 @@ const ProjectDetail = () => {
       const res = await api.get(`/projects/${id}/github-status`);
       setIntegrationData(res.data || null);
     } catch (err) {
-      console.error("Gagal memuat status integrasi GitHub:", err);
       setIntegrationData(null); 
     }
   }, [id]);
@@ -181,11 +192,10 @@ const ProjectDetail = () => {
   const fetchProject = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
       const res = await api.get(`/projects/${id}`);
       setProject(res.data);
     } catch (err) {
-      setError(err.response?.status === 404 ? "Proyek tidak ditemukan." : "Gagal memuat data proyek.");
+      setError("Gagal memuat data proyek.");
     } finally {
       setLoading(false);
     }
@@ -197,48 +207,36 @@ const ProjectDetail = () => {
     }
   }, [id, fetchProject, fetchGitHubStatus]);
 
-  const isSuperAdmin = currentUser.role === 'SUPERADMIN';
-  const isAdmin = currentUser.role === 'ADMIN';
-  const isBA = currentUser.role === 'BUSINESSANALYST';
-  const isProjectOwner = currentUser.role === 'PROJECTOWNER';
-
-  const hasWriteAccess = () => {
-    if (isProjectOwner) return false;
-    if (isSuperAdmin || isAdmin) return true;
-    if (isBA && (location.pathname.includes('vision-board') || location.pathname.includes('backlog'))) return true;
-    
-    return false;
-  };
-
   const handleAddButtonClick = () => {
     if (location.pathname.includes('vision-board')) {
       visionBoardRef.current?.openNewBoardModal();
-    } else {
+    } else if (hasWriteAccess()) {
       setFormData({ title: '', description: '' }); 
       setShowAddModal(true);
+    } else {
+      alert("Anda tidak memiliki izin untuk menambah data di sini.");
     }
   };
 
   const handleSave = async () => {
     if (!hasWriteAccess()) {
-      alert("Akses Ditolak: Anda berada dalam mode baca atau tidak memiliki otoritas di modul ini.");
+      alert("Akses Ditolak: Anda tidak memiliki otoritas untuk menyimpan perubahan.");
       return;
     }
 
     try {
       setIsSubmitting(true);
+      // Sesuaikan endpoint berdasarkan jalur (path) yang aktif
+      const path = location.pathname;
       let endpoint = '';
-      
-      if (location.pathname.includes('backlog')) endpoint = `/projects/${id}/backlogs`;
+      if (path.includes('backlog')) endpoint = `/projects/${id}/backlogs`;
+      else if (path.includes('vision-board')) endpoint = `/projects/${id}/vision-boards`;
 
       if (endpoint) {
-        const payload = { ...formData, name: formData.title };
-        await api.post(endpoint, payload);
+        await api.post(endpoint, { ...formData, name: formData.title });
         setShowAddModal(false);
         setFormData({ title: '', description: '' });
-        
         fetchProject();
-        fetchGitHubStatus();
       }
     } catch (err) {
       alert("Gagal menyimpan: " + (err.response?.data?.message || err.message));
@@ -309,7 +307,7 @@ const ProjectDetail = () => {
           )}
         </div>
       </div>
-
+      
       <div className="grid grid-cols-12 gap-6">
         {/* SIDEBAR */}
         <div className="col-span-12 lg:col-span-3 flex flex-col gap-2">
